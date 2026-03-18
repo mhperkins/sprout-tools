@@ -1,0 +1,21 @@
+# Dependency & Build Folders (Massive token drain)
+node_modules/
+.next/
+.vercel/
+.git/
+dist/
+build/
+out/
+
+# Media & Assets (Claude can't "read" these well)
+public/assets/
+*.jpg
+*.png
+*.gif
+*.mp4
+*.pdf
+
+# Environment & Logs
+.env*
+*.log
+.DS_Store
