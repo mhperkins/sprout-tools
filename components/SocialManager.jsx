@@ -480,47 +480,6 @@ const CHAT_SUGGESTIONS = [
 ];
 
 // ─── Supabase transform helpers ───────────────────────────────────────────────
-function rowToPost(row) {
-  return {
-    id: row.id,
-    title: row.title || "",
-    caption: row.caption || "",
-    contentType: row.content_type || "post",
-    category: row.category || "community",
-    status: row.status || "draft",
-    scheduledAt: row.scheduled_at || "",
-    publishedAt: row.published_at || "",
-    hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
-    imageData: null,
-    imageUrl: row.image_url || "",
-    instagramMediaId: row.instagram_media_id || null,
-    likes: row.likes || 0,
-    comments: row.comments || 0,
-    reach: row.reach || 0,
-    feedback: row.notes || "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function postToRow(post) {
-  return {
-    title: post.title || "",
-    caption: post.caption || "",
-    content_type: post.contentType || "post",
-    category: post.category || "community",
-    status: post.status || "draft",
-    scheduled_at: post.scheduledAt || null,
-    published_at: post.publishedAt || null,
-    tags: post.hashtags || [],
-    image_url: post.imageUrl || null,
-    instagram_media_id: post.instagramMediaId || null,
-    likes: post.likes || 0,
-    comments: post.comments || 0,
-    reach: post.reach || 0,
-    notes: post.feedback || null,
-  };
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function statusBadge(status) {
@@ -548,6 +507,51 @@ function formatDate(dateStr) {
 function truncate(str, len = 80) {
   if (!str) return "";
   return str.length > len ? str.slice(0, len) + "…" : str;
+}
+
+// ─── Supabase field translation ───────────────────────────────────────────────
+function rowToPost(row) {
+  return {
+    id: row.id,
+    title: row.title || "",
+    caption: row.caption || "",
+    contentType: row.content_type || "post",
+    category: row.category || "community",
+    status: row.status || "draft",
+    scheduledAt: row.scheduled_at || "",
+    publishedAt: row.published_at || "",
+    imageUrl: row.image_url || "",
+    instagramMediaId: row.instagram_media_id || "",
+    likes: row.likes || 0,
+    comments: row.comments || 0,
+    reach: row.reach || 0,
+    hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
+    notes: row.notes || "",
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+function postToRow(post, userId) {
+  return {
+    id: post.id,
+    user_id: userId,
+    title: post.title || "",
+    caption: post.caption || "",
+    content_type: post.contentType || "post",
+    category: post.category || "community",
+    status: post.status || "draft",
+    scheduled_at: post.scheduledAt || null,
+    published_at: post.publishedAt || null,
+    image_url: post.imageUrl || null,
+    instagram_media_id: post.instagramMediaId || null,
+    likes: post.likes || 0,
+    comments: post.comments || 0,
+    reach: post.reach || 0,
+    tags: post.hashtags || [...BRAND_VOICE.brandHashtags],
+    notes: post.notes || "",
+    updated_at: new Date().toISOString(),
+  };
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
@@ -1043,9 +1047,10 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
   };
 
   const publishNow = () => {
-    if (form.status !== "approved") return;
-    setShowConfirm(true);
-  };
+  if (form.status !== "approved") return;
+  if (!form.imageUrl?.trim()) { showToast("Add a public image URL before publishing"); return; }
+  setShowConfirm(true);
+};
 
   const confirmPublish = async () => {
     setShowConfirm(false);
