@@ -996,7 +996,7 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
   const [form, setForm] = useState({
     title: "", caption: "", contentType: "post", category: "community",
     scheduledAt: "", hashtags: [...BRAND_VOICE.brandHashtags], imageData: null,
-    imageUrl: "", status: "draft",
+    imageUrl: "", thumbnailUrl: "", status: "draft",
     ...(post || {}),
   });
   const [dragActive, setDragActive] = useState(false);
@@ -1013,12 +1013,36 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleImageUpload = (file) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    if (file.size > 8 * 1024 * 1024) { showToast("Image must be under 8MB"); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => update("imageData", e.target.result);
-    reader.readAsDataURL(file);
+  const handleImageUpload = async (file) => {
+    if (!file) return;
+    const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+    if (!isImage && !isVideo) return;
+    if (isImage && file.size > 8 * 1024 * 1024) { showToast("Image must be under 8MB"); return; }
+    if (isVideo && file.size > 100 * 1024 * 1024) { showToast("Video must be under 100MB"); return; }
+
+    showToast("Uploading…");
+    const { data: { user } } = await supabase.auth.getUser();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    if (isImage) {
+      formData.append("userId", user.id);
+      const res = await fetch("/api/upload-image", { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.error) { showToast("Upload failed: " + data.error); return; }
+      update("imageUrl", data.url);
+      update("imageData", null);
+      showToast("Image uploaded!");
+    } else {
+      const res = await fetch("/api/upload-video", { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.error) { showToast("Upload failed: " + data.error); return; }
+      update("imageUrl", data.url);
+      update("imageData", null);
+      if (data.thumbnailUrl) update("thumbnailUrl", data.thumbnailUrl);
+      showToast("Video uploaded!");
+    }
   };
 
   const handleDrop = (e) => { e.preventDefault(); setDragActive(false); handleImageUpload(e.dataTransfer.files[0]); };
