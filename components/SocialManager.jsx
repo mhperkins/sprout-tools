@@ -527,6 +527,9 @@ function rowToPost(row) {
     reach: row.reach || 0,
     hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
     notes: row.notes || "",
+    thumbnailUrl: row.thumbnail_url || "",
+    mediaUrls: row.media_urls || null,
+    mediaType: row.media_type || null,
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),
   };
@@ -550,6 +553,9 @@ function postToRow(post, userId) {
     reach: post.reach || 0,
     tags: post.hashtags || [...BRAND_VOICE.brandHashtags],
     notes: post.notes || "",
+    thumbnail_url: post.thumbnailUrl || null,
+    media_urls: post.mediaUrls || null,
+    media_type: post.mediaType || null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -1183,7 +1189,30 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
               )}
             </div>
 
+            {form.contentType === "reel" && (
             <div className="form-group">
+              <label className="form-label">Reel Thumbnail <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional — auto-generated if blank)</span></label>
+              {form.thumbnailUrl ? (
+                <div style={{ position: "relative", display: "inline-block" }}>
+                  <img src={form.thumbnailUrl} alt="Thumbnail" style={{ maxWidth: 160, borderRadius: 8, border: "1px solid var(--border)" }} />
+                  <button onClick={() => update("thumbnailUrl", "")} style={{
+                    position: "absolute", top: 4, right: 4, background: "#fff", border: "1px solid var(--border)",
+                    borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 12,
+                    display: "flex", alignItems: "center", justifyContent: "center"
+                  }}>✕</button>
+                </div>
+              ) : (
+                <div className="upload-zone" style={{ padding: "16px 24px" }}
+                  onClick={() => document.getElementById("thumb-input").click()}>
+                  <input id="thumb-input" type="file" style={{ display: "none" }} accept="image/*"
+                    onChange={e => handleImageUpload(e.target.files[0])} />
+                  <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Upload custom thumbnail (optional)</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="form-group">
               <label className="form-label">
                 Image URL <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(required to publish to Instagram)</span>
               </label>
