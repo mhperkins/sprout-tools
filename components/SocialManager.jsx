@@ -727,8 +727,11 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <div className={`nav-item ${view === "analytics" ? "active" : ""}`} onClick={() => setView("analytics")} title="Analytics">
               <Icon name="analytics" size={15} /> <span className="nav-text">Analytics</span>
             </div>
-            <div className={`nav-item ${view === "brandVoice" ? "active" : ""}`} onClick={() => setView("brandVoice")} title="Brand Voice">
+           <div className={`nav-item ${view === "brandVoice" ? "active" : ""}`} onClick={() => setView("brandVoice")} title="Brand Voice">
               <Icon name="brand" size={15} /> <span className="nav-text">Brand Voice</span>
+            </div>
+            <div className={`nav-item ${view === "coach" ? "active" : ""}`} onClick={() => setView("coach")} title="AI Coach">
+              <span style={{ fontSize: 15 }}>🧠</span> <span className="nav-text">AI Coach</span>
             </div>
           </div>
 
@@ -788,8 +791,11 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <AnalyticsView posts={posts} />
           )}
           {view === "brandVoice" && (
-            <BrandVoiceView />
-          )}
+  <BrandVoiceView />
+)}
+{view === "coach" && (
+  <CoachView posts={posts} />
+)}
         </main>
 
         {toast && <div className="toast">✓ {toast}</div>}
@@ -1853,5 +1859,305 @@ Always write captions in Sprout Society's warm, inclusive voice. End captions wi
         {open ? "✕" : "💬"}
       </button>
     </>
+  );
+}
+
+// ─── AI Coach View ────────────────────────────────────────────────────────────
+function CoachView({ posts }) {
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content: "Hi! I'm your Sprout Society strategy coach 🧠\n\nI work on big-picture social media strategy — driving event attendance, space rentals, donor acquisition, and community growth.\n\nI can also search the web live to research partner orgs, benchmarks, and what's happening in your space.\n\nWhat are we working on?",
+    }
+  ]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const endDiv = useRef(null);
+
+  useEffect(() => {
+    if (endDiv.current) endDiv.current.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const publishedPosts = posts.filter(p => p.status === "published");
+  const avgLikes = publishedPosts.length > 0
+    ? Math.round(publishedPosts.reduce((s, p) => s + (p.likes || 0), 0) / publishedPosts.length)
+    : 0;
+  const avgReach = publishedPosts.length > 0
+    ? Math.round(publishedPosts.reduce((s, p) => s + (p.reach || 0), 0) / publishedPosts.length)
+    : 0;
+  const topPost = [...publishedPosts].sort((a, b) => (b.likes || 0) - (a.likes || 0))[0];
+
+  const buildCoachContext = () => {
+    const perf = publishedPosts.length > 0
+      ? `${publishedPosts.length} posts published. Avg likes: ${avgLikes}. Avg reach: ${avgReach}. Top post: "${topPost?.title}" (${topPost?.likes || 0} likes, ${topPost?.reach || 0} reach).`
+      : "No published posts yet.";
+    const pipeline = posts
+      .filter(p => p.status === "draft" || p.status === "pending_review")
+      .slice(0, 5)
+      .map(p => `"${p.title}" (${p.status})`)
+      .join(", ") || "None.";
+
+    return `You are the AI strategy coach for Sprout Society — a peer mental wellness nonprofit in Brooklyn, NY (@sproutsocietyorg).
+
+MISSION: Build community and foster connection for mental wellness. Nobody should go through it alone.
+PROGRAMS: Empathetic Strangers (1:1 peer connection), Peer Support Groups, Connect to Learn (expert-led sessions).
+SPACE: Available for community events and rentals in Brooklyn.
+
+PRIMARY GOALS (ranked — ALL advice must ladder to these):
+1. Event attendance — Drive RSVPs and in-person attendance to Sprout Society events
+2. Space rental conversions — Convert orgs to host events at the Sprout Society space
+3. Calendar listings — Get partner orgs to advertise their events on sproutsociety.org
+4. Donor acquisition & retention — Convert Instagram audience into financial supporters
+5. Community growth — Grow Instagram reach among aligned audiences in Brooklyn/NYC and beyond
+
+AUDIENCE SEGMENTS:
+- Local community (Bushwick/Brooklyn/NYC): Goals 1, 2, 5. Geo-tagged posts, local hashtags, event content, collab cross-promotion.
+- Collaborator orgs (NYC-primary): Goals 2, 3. Space showcase, community proof, partnership stories.
+- Donors (national/global): Goal 4. Impact storytelling, emotional resonance, mission-driven, testimonials, urgent campaign appeals.
+
+DONOR CONTENT RULES:
+- Emotional resonance OVER information for donor-targeted content
+- Donor audience skews older and more affluent — adjust tone and format accordingly
+- Instagram tactics: link-in-bio to donation page, Stories donation sticker, impact Reels, end-of-year/campaign pushes
+- Always flag whether a post is donor-oriented vs. community-oriented
+
+BRAND VOICE:
+- Tone: ${BRAND_VOICE.tone}
+- Sentence style: ${BRAND_VOICE.sentenceStyle}
+- We say: ${BRAND_VOICE.weSay.join(", ")}
+- We NEVER say: ${BRAND_VOICE.weNeverSay.join(", ")}
+
+LIVE PERFORMANCE DATA:
+${perf}
+
+CONTENT PIPELINE (drafts/pending):
+${pipeline}
+
+YOUR CAPABILITIES:
+1. Strategic analysis — content mix audits, goal alignment, audience targeting gaps
+2. Partnership research — use web search to find collaborator orgs in Brooklyn/NYC
+3. Donor strategy — campaign planning, impact storytelling, fundraising calendar
+4. Performance coaching — interpret metrics, identify gaps, recommend pivots
+5. Competitive context — research peer nonprofit social strategies via web search
+6. Editorial planning — content pillar mix, posting cadence, campaign arcs
+
+You have live web search. Use it proactively when asked about specific orgs, benchmarks, or local events. Be direct, specific, and actionable. Always connect recommendations back to the 5 ranked goals.`;
+  };
+
+  const COACH_SUGGESTIONS = [
+    { icon: "🎯", label: "Audit content mix", prompt: "Audit my current content against the 5 goals. What gaps do you see?" },
+    { icon: "🤝", label: "Find partner orgs", prompt: "Search for Brooklyn mental health or wellness orgs that could be good Sprout Society partners." },
+    { icon: "💝", label: "Donor strategy", prompt: "Build an Instagram donor acquisition strategy for us. What content should we prioritize?" },
+    { icon: "🎪", label: "Event RSVP plan", prompt: "How should we use Instagram to maximize event RSVPs? Give me a pre-event posting plan." },
+    { icon: "🏠", label: "Space rental content", prompt: "What content would most effectively convert orgs to rent the Sprout Society space?" },
+    { icon: "📊", label: "Benchmark us", prompt: "Search for Instagram engagement benchmarks for small nonprofits. How do we compare?" },
+  ];
+
+  const sendMessage = async (text) => {
+    const userText = (text || input).trim();
+    if (!userText || typing) return;
+    setInput("");
+    const newMessages = [...messages, { role: "user", content: userText }];
+    setMessages(newMessages);
+    setTyping(true);
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3000,
+          system: buildCoachContext(),
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+        }),
+      });
+      const data = await res.json();
+      const reply = data.content
+        ?.filter(i => i.type === "text")
+        .map(i => i.text)
+        .join("") || "Sorry, I had trouble responding. Please try again.";
+      setMessages(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "Something went wrong. Please check your connection." }]);
+    }
+    setTyping(false);
+  };
+
+  const handleKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const renderContent = (text) => {
+    const lines = text.split("\n");
+    return lines.map((line, i) => {
+      const parts = line.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+        p.startsWith("**") && p.endsWith("**")
+          ? <strong key={j}>{p.slice(2, -2)}</strong>
+          : p
+      );
+      return <span key={i}>{parts}{i < lines.length - 1 && <br />}</span>;
+    });
+  };
+
+  const GOALS = [
+    { num: 1, label: "Event Attendance", icon: "🎪" },
+    { num: 2, label: "Space Rentals", icon: "🏠" },
+    { num: 3, label: "Calendar Listings", icon: "📅" },
+    { num: 4, label: "Donor Acquisition", icon: "💝" },
+    { num: 5, label: "Community Growth", icon: "🌱" },
+  ];
+
+  return (
+    <div style={{ display: "flex", gap: 20, height: "calc(100vh - 48px)", overflow: "hidden" }}>
+
+      {/* ── Left Panel ── */}
+      <div style={{ width: 210, minWidth: 210, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+        <div className="card" style={{ padding: 16 }}>
+          <div className="section-title" style={{ marginBottom: 10 }}>🎯 North Star Goals</div>
+          {GOALS.map(g => (
+            <div key={g.num} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 13
+            }}>
+              <span style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 700, minWidth: 14 }}>#{g.num}</span>
+              <span>{g.icon}</span>
+              <span style={{ color: "var(--text-primary)" }}>{g.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div className="section-title" style={{ marginBottom: 10 }}>📊 Snapshot</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 2.2 }}>
+            <div><strong style={{ color: "var(--text-primary)" }}>{publishedPosts.length}</strong> published</div>
+            <div><strong style={{ color: "var(--text-primary)" }}>{avgLikes}</strong> avg likes</div>
+            <div><strong style={{ color: "var(--text-primary)" }}>{avgReach}</strong> avg reach</div>
+            <div><strong style={{ color: "var(--text-primary)" }}>{posts.filter(p => p.status === "draft").length}</strong> drafts</div>
+            <div><strong style={{ color: "var(--text-primary)" }}>{posts.filter(p => p.status === "pending_review").length}</strong> pending review</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div className="section-title" style={{ marginBottom: 8 }}>🌐 Web Search</div>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.7 }}>
+            Ask me to research partner orgs, nonprofit benchmarks, or Brooklyn events in real time.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Right Panel — Chat ── */}
+      <div style={{
+        flex: 1, display: "flex", flexDirection: "column",
+        background: "#fff", borderRadius: 12,
+        border: "1px solid var(--border)", overflow: "hidden", minWidth: 0
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "14px 20px", borderBottom: "1px solid var(--border)",
+          display: "flex", alignItems: "center", gap: 12,
+          background: "var(--sprout-green)", flexShrink: 0
+        }}>
+          <div style={{ fontSize: 22 }}>🧠</div>
+          <div>
+            <div style={{ fontFamily: "Lora, serif", fontWeight: 700, fontSize: 16, color: "var(--sprout-lime)" }}>
+              AI Strategy Coach
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+              Sprout Society · Strategic Intelligence
+            </div>
+          </div>
+          <button
+            onClick={() => setMessages([{ role: "assistant", content: "Cleared. What strategy challenge are we tackling? 🧠" }])}
+            style={{
+              marginLeft: "auto", background: "rgba(255,255,255,0.1)",
+              border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)",
+              borderRadius: 6, padding: "4px 10px", fontSize: 11,
+              cursor: "pointer", fontFamily: "DM Sans, sans-serif"
+            }}>
+            Clear
+          </button>
+        </div>
+
+        {/* Messages */}
+        <div style={{
+          flex: 1, overflowY: "auto", padding: "16px 20px",
+          display: "flex", flexDirection: "column", gap: 14
+        }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{
+              display: "flex", gap: 10,
+              flexDirection: m.role === "user" ? "row-reverse" : "row",
+              alignItems: "flex-start"
+            }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                background: m.role === "assistant" ? "var(--sprout-sage)" : "var(--sprout-sky)",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15
+              }}>
+                {m.role === "assistant" ? "🧠" : "👤"}
+              </div>
+              <div style={{
+                maxWidth: "76%", padding: "10px 15px", lineHeight: 1.75, fontSize: 14,
+                borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px",
+                background: m.role === "user" ? "var(--sprout-green)" : "var(--sprout-cream)",
+                color: m.role === "user" ? "#fff" : "var(--text-primary)",
+              }}>
+                {renderContent(m.content)}
+              </div>
+            </div>
+          ))}
+          {typing && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: "50%",
+                background: "var(--sprout-sage)", display: "flex",
+                alignItems: "center", justifyContent: "center", fontSize: 15
+              }}>🧠</div>
+              <div style={{ padding: "10px 15px", borderRadius: "4px 12px 12px 12px", background: "var(--sprout-cream)" }}>
+                <div className="chat-typing"><span /><span /><span /></div>
+              </div>
+            </div>
+          )}
+          <div ref={endDiv} />
+        </div>
+
+        {/* Suggestion chips — only on fresh chat */}
+        {messages.length <= 1 && (
+          <div style={{
+            padding: "8px 16px 4px", display: "flex", gap: 8,
+            flexWrap: "wrap", borderTop: "1px solid var(--border)", flexShrink: 0
+          }}>
+            {COACH_SUGGESTIONS.map((s, i) => (
+              <button key={i} className="chat-suggestion-chip" onClick={() => sendMessage(s.prompt)}>
+                {s.icon} {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input */}
+        <div style={{
+          padding: "12px 16px", borderTop: "1px solid var(--border)",
+          display: "flex", gap: 8, flexShrink: 0
+        }}>
+          <textarea
+            className="chat-input"
+            placeholder="Ask about strategy, partner orgs, donor campaigns, content mix…"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            rows={1}
+            style={{ flex: 1 }}
+          />
+          <button
+            className="chat-send"
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || typing}>
+            ➤
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
