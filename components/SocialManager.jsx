@@ -459,10 +459,10 @@ const CATEGORIES = [
 ];
 
 const BRAND_VOICE = {
-  tone: "Warm, inclusive, hopeful — like a supportive friend who always shows up.",
+  tone: "Warm, inclusive, hopeful - like a supportive friend who always shows up.",
   sentenceStyle: "Short, active, accessible. Avoid clinical or corporate language.",
   vocabulary: "Community-first. Say 'community' not 'customers'. Say 'connect' not 'network'.",
-  emojis: "🌱 ✨ 💚 🤝 🌿 💡 — max 2 per post, never to start a sentence.",
+  emojis: "🌱 ✨ 💚 🤝 🌿 💡 - max 2 per post, never to start a sentence.",
   hashtags: "Max 5 per post. Always include #SproutSociety + #MentalWellness. Add 3 niche tags.",
   cta: "End with a question to invite engagement. Example: 'What helps you feel connected?'",
   weSay: ["Community", "Connection", "Peer support", "Wellness", "Together", "Safe space"],
@@ -817,7 +817,7 @@ function DashboardView({ stats, posts, setView, setEditingPost }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <h2>🌿 Social Dashboard</h2>
-            <p>Your content command center. Create, approve, and publish — all in one place.</p>
+            <p>Your content command center. Create, approve, and publish - all in one place.</p>
           </div>
           <button className="btn btn-primary" onClick={() => { setEditingPost(null); setView("editor"); }}>
             <Icon name="add" /> New Post
@@ -1190,14 +1190,14 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
                   <input id="post-image-input" type="file" style={{ display: "none" }} accept="image/*" onChange={handleFileInput} />
                   <div style={{ fontSize: 36, marginBottom: 8 }}>🖼️</div>
                   <p style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Drop image here or click to browse</p>
-                  <p style={{ fontSize: 13, color: "var(--text-muted)" }}>JPG, PNG, WebP — max 8MB · for preview only</p>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)" }}>JPG, PNG, WebP - max 8MB · for preview only</p>
                 </div>
               )}
             </div>
 
             {form.contentType === "reel" && (
             <div className="form-group">
-              <label className="form-label">Reel Thumbnail <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional — auto-generated if blank)</span></label>
+              <label className="form-label">Reel Thumbnail <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional - auto-generated if blank)</span></label>
               {form.thumbnailUrl ? (
                 <div style={{ position: "relative", display: "inline-block" }}>
                   <img src={form.thumbnailUrl} alt="Thumbnail" style={{ maxWidth: 160, borderRadius: 8, border: "1px solid var(--border)" }} />
@@ -1223,7 +1223,7 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
                 Image URL <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(required to publish to Instagram)</span>
               </label>
               <input className="form-input" value={form.imageUrl || ""} onChange={e => update("imageUrl", e.target.value)}
-                placeholder="https://... (direct public URL — no query params)" />
+                placeholder="https://... (direct public URL - no query params)" />
               <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                 Must be a publicly accessible URL. CDN links and Supabase Storage URLs work. Signed/expiring URLs do not.
               </p>
@@ -1711,14 +1711,14 @@ function AIChatOverlay({ posts, showToast }) {
     setTyping(true);
 
     const postContext = posts.length > 0
-      ? `CURRENT POSTS (${posts.length}): ${posts.slice(0, 10).map(p => `"${p.title || "Untitled"}" — status: ${p.status}, type: ${p.contentType}, caption: "${(p.caption || "").slice(0, 80)}"`).join("; ")}`
+      ? `CURRENT POSTS (${posts.length}): ${posts.slice(0, 10).map(p => `"${p.title || "Untitled"}" - status: ${p.status}, type: ${p.contentType}, caption: "${(p.caption || "").slice(0, 80)}"`).join("; ")}`
       : "No posts created yet.";
 
     const publishedContext = posts.filter(p => p.status === "published").length > 0
-      ? `PUBLISHED POSTS (${posts.filter(p => p.status === "published").length}): ${posts.filter(p => p.status === "published").slice(0, 5).map(p => `"${p.title}" — likes: ${p.likes || 0}, comments: ${p.comments || 0}, reach: ${p.reach || 0}`).join("; ")}`
+      ? `PUBLISHED POSTS (${posts.filter(p => p.status === "published").length}): ${posts.filter(p => p.status === "published").slice(0, 5).map(p => `"${p.title}" - likes: ${p.likes || 0}, comments: ${p.comments || 0}, reach: ${p.reach || 0}`).join("; ")}`
       : "No published posts yet.";
 
-    const systemPrompt = `You are a social media content strategist for Sprout Society — a peer mental wellness nonprofit in Brooklyn, NY. You help create engaging Instagram content that builds community and destigmatizes mental health support.
+    const systemPrompt = `You are a social media content strategist for Sprout Society - a peer mental wellness nonprofit in Brooklyn, NY. You help create engaging Instagram content that builds community and destigmatizes mental health support.
 
 ORGANIZATION:
 - Name: Sprout Society | Location: Brooklyn, NY
@@ -1741,12 +1741,12 @@ ${postContext}
 ${publishedContext}
 
 YOUR CAPABILITIES:
-1. **Caption Writing** — Draft, iterate, and polish Instagram captions in brand voice
-2. **Content Strategy** — Recommend topics, themes, posting schedules, content mix
-3. **Hashtag Research** — Suggest relevant hashtags mixing branded + discovery tags
-4. **Brand Validation** — Check captions against brand guidelines, flag issues
-5. **Post Ideas** — Generate content concepts based on programs, events, community themes
-6. **Engagement Tips** — Advise on best practices for growing Instagram engagement
+1. **Caption Writing** - Draft, iterate, and polish Instagram captions in brand voice
+2. **Content Strategy** - Recommend topics, themes, posting schedules, content mix
+3. **Hashtag Research** - Suggest relevant hashtags mixing branded + discovery tags
+4. **Brand Validation** - Check captions against brand guidelines, flag issues
+5. **Post Ideas** - Generate content concepts based on programs, events, community themes
+6. **Engagement Tips** - Advise on best practices for growing Instagram engagement
 
 Always write captions in Sprout Society's warm, inclusive voice. End captions with an engaging question. Keep responses actionable and specific. Use **bold** for emphasis.`;
 
@@ -1867,7 +1867,7 @@ function CoachView({ posts }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: "Hi! I'm your Sprout Society strategy coach 🧠\n\nI work on big-picture social media strategy — driving event attendance, space rentals, donor acquisition, and community growth.\n\nI can also search the web live to research partner orgs, benchmarks, and what's happening in your space.\n\nWhat are we working on?",
+      content: "Hi! I'm your Sprout Society strategy coach 🧠\n\nI work on big-picture social media strategy - driving event attendance, space rentals, donor acquisition, and community growth.\n\nI can also search the web live to research partner orgs, benchmarks, and what's happening in your space.\n\nWhat are we working on?",
     }
   ]);
   const [input, setInput] = useState("");
@@ -1897,18 +1897,18 @@ function CoachView({ posts }) {
       .map(p => `"${p.title}" (${p.status})`)
       .join(", ") || "None.";
 
-    return `You are the AI strategy coach for Sprout Society — a peer mental wellness nonprofit in Brooklyn, NY (@sproutsocietyorg).
+    return `You are the AI strategy coach for Sprout Society - a peer mental wellness nonprofit in Brooklyn, NY (@sproutsocietyorg).
 
 MISSION: Build community and foster connection for mental wellness. Nobody should go through it alone.
 PROGRAMS: Empathetic Strangers (1:1 peer connection), Peer Support Groups, Connect to Learn (expert-led sessions).
 SPACE: Available for community events and rentals in Brooklyn.
 
-PRIMARY GOALS (ranked — ALL advice must ladder to these):
-1. Event attendance — Drive RSVPs and in-person attendance to Sprout Society events
-2. Space rental conversions — Convert orgs to host events at the Sprout Society space
-3. Calendar listings — Get partner orgs to advertise their events on sproutsociety.org
-4. Donor acquisition & retention — Convert Instagram audience into financial supporters
-5. Community growth — Grow Instagram reach among aligned audiences in Brooklyn/NYC and beyond
+PRIMARY GOALS (ranked - ALL advice must ladder to these):
+1. Event attendance - Drive RSVPs and in-person attendance to Sprout Society events
+2. Space rental conversions - Convert orgs to host events at the Sprout Society space
+3. Calendar listings - Get partner orgs to advertise their events on sproutsociety.org
+4. Donor acquisition & retention - Convert Instagram audience into financial supporters
+5. Community growth - Grow Instagram reach among aligned audiences in Brooklyn/NYC and beyond
 
 AUDIENCE SEGMENTS:
 - Local community (Bushwick/Brooklyn/NYC): Goals 1, 2, 5. Geo-tagged posts, local hashtags, event content, collab cross-promotion.
@@ -1917,7 +1917,7 @@ AUDIENCE SEGMENTS:
 
 DONOR CONTENT RULES:
 - Emotional resonance OVER information for donor-targeted content
-- Donor audience skews older and more affluent — adjust tone and format accordingly
+- Donor audience skews older and more affluent - adjust tone and format accordingly
 - Instagram tactics: link-in-bio to donation page, Stories donation sticker, impact Reels, end-of-year/campaign pushes
 - Always flag whether a post is donor-oriented vs. community-oriented
 
@@ -1934,12 +1934,12 @@ CONTENT PIPELINE (drafts/pending):
 ${pipeline}
 
 YOUR CAPABILITIES:
-1. Strategic analysis — content mix audits, goal alignment, audience targeting gaps
-2. Partnership research — use web search to find collaborator orgs in Brooklyn/NYC
-3. Donor strategy — campaign planning, impact storytelling, fundraising calendar
-4. Performance coaching — interpret metrics, identify gaps, recommend pivots
-5. Competitive context — research peer nonprofit social strategies via web search
-6. Editorial planning — content pillar mix, posting cadence, campaign arcs
+1. Strategic analysis - content mix audits, goal alignment, audience targeting gaps
+2. Partnership research - use web search to find collaborator orgs in Brooklyn/NYC
+3. Donor strategy - campaign planning, impact storytelling, fundraising calendar
+4. Performance coaching - interpret metrics, identify gaps, recommend pivots
+5. Competitive context - research peer nonprofit social strategies via web search
+6. Editorial planning - content pillar mix, posting cadence, campaign arcs
 
 You have live web search. Use it proactively when asked about specific orgs, benchmarks, or local events. Be direct, specific, and actionable. Always connect recommendations back to the 5 ranked goals.`;
   };
@@ -2046,7 +2046,7 @@ You have live web search. Use it proactively when asked about specific orgs, ben
         </div>
       </div>
 
-      {/* ── Right Panel — Chat ── */}
+      {/* ── Right Panel - Chat ── */}
       <div style={{
         flex: 1, display: "flex", flexDirection: "column",
         background: "#fff", borderRadius: 12,
@@ -2122,7 +2122,7 @@ You have live web search. Use it proactively when asked about specific orgs, ben
           <div ref={endDiv} />
         </div>
 
-        {/* Suggestion chips — only on fresh chat */}
+        {/* Suggestion chips - only on fresh chat */}
         {messages.length <= 1 && (
           <div style={{
             padding: "8px 16px 4px", display: "flex", gap: 8,
