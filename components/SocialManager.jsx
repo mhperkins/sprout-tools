@@ -910,7 +910,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         {/* ── Main Content ── */}
         <main className={`main ${sidebarCollapsed ? "collapsed" : ""}`}>
           {view === "dashboard" && (
-            <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} />
+            <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} setSelectedPost={setSelectedPost} />
           )}
           {view === "calendar" && (
             <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} />
@@ -1010,60 +1010,50 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
 }
 
 // ─── Dashboard View ──────────────────────────────────────────────────────────
-function DashboardView({ stats, posts, setView, setEditingPost }) {
+function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost }) {
   const recentPosts = [...posts].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
-  const pendingPosts = posts.filter(p => p.status === "pending_review");
-  const scheduledPosts = posts.filter(p => p.status === "approved" && p.scheduledAt).sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)).slice(0, 5);
+  const scheduledPosts = posts.filter(p => p.status === "scheduled" && p.scheduledAt)
+    .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)).slice(0, 5);
+  const readyPosts = posts.filter(p => p.status === "ready");
+
+  const lifecycleStats = [
+    { key: "planned",   label: "Planned",   icon: "🗓️", value: stats.planned,   sub: "ideas in pipeline",     color: "#2E7D32" },
+    { key: "draft",     label: "Draft",     icon: "📝", value: stats.drafts,    sub: "in progress",            color: "var(--draft-text)" },
+    { key: "ready",     label: "Ready",     icon: "✅", value: stats.ready,     sub: "to schedule or publish", color: "var(--approved-text)" },
+    { key: "scheduled", label: "Scheduled", icon: "⏰", value: stats.scheduled, sub: "queued up",              color: "var(--scheduled-text)" },
+    { key: "published", label: "Published", icon: "🟣", value: stats.published, sub: "live on Instagram",      color: "var(--published-text)" },
+    { key: "engagement",label: "Engagement",icon: "❤️", value: stats.totalEngagement.toLocaleString(), sub: "likes + comments", color: "var(--sprout-coral)" },
+  ];
 
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <h2>🌿 Social Dashboard</h2>
-            <p>Your content command center. Create, approve, and publish - all in one place.</p>
-          </div>
-          <button className="btn btn-primary" onClick={() => { setEditingPost(null); setView("editor"); }}>
-            <Icon name="add" /> New Post
-          </button>
-        </div>
+        <h2>🌿 Social Dashboard</h2>
+        <p>Your content pipeline at a glance.</p>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="label">Total Posts</div>
-          <div className="value">{stats.total}</div>
-          <div className="sub">{stats.published} published</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Pending Review</div>
-          <div className="value" style={{ color: stats.pending > 0 ? "var(--sprout-coral)" : undefined }}>{stats.pending}</div>
-          <div className="sub">{stats.approved} approved & ready</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Published</div>
-          <div className="value">{stats.published}</div>
-          <div className="sub">to Instagram</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Engagement</div>
-          <div className="value">{stats.totalEngagement.toLocaleString()}</div>
-          <div className="sub">likes + comments</div>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
+        {lifecycleStats.map(s => (
+          <div key={s.key} className="stat-card">
+            <div className="label">{s.icon} {s.label}</div>
+            <div className="value" style={{ color: s.color, fontSize: 28 }}>{s.value}</div>
+            <div className="sub">{s.sub}</div>
+          </div>
+        ))}
       </div>
 
       <div className="two-col">
         <div className="card">
-          <h3 className="section-title">📋 Recent Posts</h3>
+          <h3 className="section-title">📋 Recent Activity</h3>
           {recentPosts.length === 0 ? (
             <div style={{ textAlign: "center", padding: 24, color: "var(--text-muted)" }}>
-              <p>No posts yet. Create your first one!</p>
+              <p>No posts yet. Start a content plan to get going!</p>
             </div>
           ) : (
             <div className="recent-list">
               {recentPosts.map(post => (
                 <div key={post.id} className="recent-item" style={{ cursor: "pointer" }}
-                  onClick={() => { setEditingPost(post.id); setView("editor"); }}>
+                  onClick={() => { setSelectedPost(post.id); setView("contentDetail"); }}>
                   <div className="recent-icon">📷</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600 }}>{post.title || "Untitled"}</h4>
@@ -1077,16 +1067,19 @@ function DashboardView({ stats, posts, setView, setEditingPost }) {
         </div>
 
         <div>
-          {pendingPosts.length > 0 && (
-            <div className="card" style={{ borderColor: "var(--sprout-coral)", borderWidth: 2 }}>
-              <h3 className="section-title">⏳ Needs Your Approval</h3>
-              {pendingPosts.slice(0, 3).map(post => (
+          {readyPosts.length > 0 && (
+            <div className="card" style={{ borderColor: "var(--sprout-sage)", borderWidth: 2 }}>
+              <h3 className="section-title">✅ Ready to Publish</h3>
+              {readyPosts.slice(0, 3).map(post => (
                 <div key={post.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{post.title || "Untitled"}</div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{truncate(post.caption, 40)}</div>
                   </div>
-                  <button className="btn btn-primary btn-sm" onClick={() => setView("approvals")}>Review</button>
+                  <button className="btn btn-primary btn-sm"
+                    onClick={() => { setSelectedPost(post.id); setView("contentDetail"); }}>
+                    Open
+                  </button>
                 </div>
               ))}
             </div>
@@ -1096,8 +1089,12 @@ function DashboardView({ stats, posts, setView, setEditingPost }) {
             <h3 className="section-title">🚀 Quick Actions</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button className="btn btn-outline" style={{ width: "100%", justifyContent: "center" }}
-                onClick={() => { setEditingPost(null); setView("editor"); }}>
-                📝 Create New Post
+                onClick={() => setView("plans")}>
+                ✨ New Content Plan
+              </button>
+              <button className="btn btn-outline" style={{ width: "100%", justifyContent: "center" }}
+                onClick={() => setView("myContent")}>
+                📝 My Content
               </button>
               <button className="btn btn-outline" style={{ width: "100%", justifyContent: "center" }}
                 onClick={() => setView("calendar")}>
@@ -1105,17 +1102,18 @@ function DashboardView({ stats, posts, setView, setEditingPost }) {
               </button>
               <button className="btn btn-outline" style={{ width: "100%", justifyContent: "center" }}
                 onClick={() => setView("analytics")}>
-                📊 View Analytics
+                📊 Analytics
               </button>
             </div>
           </div>
 
           {scheduledPosts.length > 0 && (
             <div className="card">
-              <h3 className="section-title">📅 Upcoming</h3>
+              <h3 className="section-title">⏰ Upcoming Scheduled</h3>
               {scheduledPosts.map(post => (
-                <div key={post.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 13 }}>{post.title || "Untitled"}</div>
+                <div key={post.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                  onClick={() => { setSelectedPost(post.id); setView("contentDetail"); }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{post.title || "Untitled"}</div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{formatDate(post.scheduledAt)}</div>
                 </div>
               ))}
