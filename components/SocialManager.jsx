@@ -919,7 +919,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} />
           )}
           {view === "myContent" && (
-            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} />
+            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setSelectedPost(id); setView("contentDetail"); }} />
           )}
           {view === "contentDetail" && (
             <ContentDetailView
@@ -2508,15 +2508,41 @@ You have live web search. Use it proactively when asked about specific orgs, ben
 }
 
 // ─── My Content View ─────────────────────────────────────────────────────────
-function MyContentView({ posts, onOpen, showToast, updatePost }) {
+function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreated }) {
   const [filter, setFilter] = useState("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ title: "", contentType: "image", category: "community", status: "draft" });
   const filtered = filter === "all" ? posts : posts.filter(p => p.status === filter);
+
+  const createPost = async () => {
+    if (!form.title.trim()) { showToast("Title is required"); return; }
+    const newPost = await addPost({
+      title: form.title.trim(),
+      contentType: form.contentType,
+      category: form.category,
+      status: form.status,
+      caption: "",
+      hashtags: [],
+      mediaItems: [],
+      todos: [],
+      notes: "",
+    });
+    showToast("Post created");
+    setShowCreate(false);
+    setForm({ title: "", contentType: "image", category: "community", status: "draft" });
+    if (newPost?.id && onCreated) onCreated(newPost.id);
+  };
 
   return (
     <div>
       <div className="page-header">
-        <h2>📋 My Content</h2>
-        <p>Track and manage all content in your pipeline.</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h2>📋 My Content</h2>
+            <p>Track and manage all content in your pipeline.</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>＋ New Post</button>
+        </div>
       </div>
 
       <div className="tabs" style={{ marginBottom: 20 }}>
@@ -2535,7 +2561,7 @@ function MyContentView({ posts, onOpen, showToast, updatePost }) {
         <div className="empty-state">
           <div className="icon">🌱</div>
           <h3>{posts.length === 0 ? "No content yet" : "None in this status"}</h3>
-          <p>{posts.length === 0 ? "Create a content plan to get started." : "Try a different filter."}</p>
+          <p>{posts.length === 0 ? "Create a post or start a content plan." : "Try a different filter."}</p>
         </div>
       ) : filtered.map(post => {
         const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
@@ -2565,6 +2591,49 @@ function MyContentView({ posts, onOpen, showToast, updatePost }) {
           </div>
         );
       })}
+    {showCreate && (
+        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
+          <div className="modal-card" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontFamily: "'Lora', serif", color: "var(--sprout-green)", fontSize: 18 }}>New Post</h3>
+              <button onClick={() => setShowCreate(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)" }}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Title *</label>
+                <input className="form-input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. April Event Announcement" autoFocus
+                  onKeyDown={e => e.key === "Enter" && createPost()} />
+              </div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Content Type</label>
+                  <select className="form-select" value={form.contentType} onChange={e => setForm(f => ({ ...f, contentType: e.target.value }))}>
+                    {CONTENT_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <select className="form-select" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                    {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Starting Status</label>
+                <select className="form-select" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                  <option value="planned">🗓️ Planned</option>
+                  <option value="draft">📝 Draft</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={createPost}>Create Post →</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
