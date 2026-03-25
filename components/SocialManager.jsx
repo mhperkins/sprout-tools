@@ -941,7 +941,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <CommunityView communityOrgs={communityOrgs} saveCommunityOrgs={saveCommunityOrgs} showToast={showToast} />
           )}
           {view === "media" && (
-            <MediaView showToast={showToast} />
+            <MediaView showToast={showToast} posts={posts} updatePost={updatePost} />
           )}
           {view === "strategies" && (
             <StrategiesView strategies={strategies} saveStrategies={saveStrategies} showToast={showToast} />
@@ -2732,6 +2732,7 @@ function CaptionMediaTab({ post, update, showToast }) {
   const [newTag, setNewTag] = useState("");
   const [newMediaUrl, setNewMediaUrl] = useState("");
   const [newMediaType, setNewMediaType] = useState("image");
+  const [showLibrary, setShowLibrary] = useState(false);
   const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
   const maxMedia = typeInfo.maxMedia || 1;
   const mediaItems = post.mediaItems || [];
@@ -2828,18 +2829,46 @@ function CaptionMediaTab({ post, update, showToast }) {
         )}
 
         {mediaItems.length < maxMedia && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <select className="form-select" style={{ width: 110 }} value={newMediaType} onChange={e => setNewMediaType(e.target.value)}>
-              <option value="image">🖼️ Image</option>
-              <option value="video">🎥 Video</option>
-            </select>
-            <input className="form-input" style={{ flex: 1 }} value={newMediaUrl}
-              onChange={e => setNewMediaUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && addMedia()}
-              placeholder="https://res.cloudinary.com/..." />
-            <button className="btn btn-primary btn-sm" onClick={addMedia}>Add</button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <select className="form-select" style={{ width: 110 }} value={newMediaType} onChange={e => setNewMediaType(e.target.value)}>
+                <option value="image">🖼️ Image</option>
+                <option value="video">🎥 Video</option>
+              </select>
+              <input className="form-input" style={{ flex: 1 }} value={newMediaUrl}
+                onChange={e => setNewMediaUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && addMedia()}
+                placeholder="https://res.cloudinary.com/..." />
+              <button className="btn btn-primary btn-sm" onClick={addMedia}>Add</button>
+            </div>
+            <button className="btn btn-outline btn-sm" style={{ width: "100%", justifyContent: "center" }}
+              onClick={() => setShowLibrary(true)}>
+              🖼️ Browse Library
+            </button>
           </div>
         )}
       </div>
+
+      {showLibrary && (
+        <div className="modal-overlay" onClick={() => setShowLibrary(false)}>
+          <div className="modal-card" style={{ width: 700, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontFamily: "'Lora', serif", color: "var(--sprout-green)", fontSize: 18 }}>Media Library</h3>
+              <button onClick={() => setShowLibrary(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)" }}>✕</button>
+            </div>
+            <div className="modal-body" style={{ overflowY: "auto", flex: 1 }}>
+              <MediaPickerGrid
+                attachLabel="✅ Attach to Post"
+                onAttach={(item) => {
+                  if (mediaItems.length >= maxMedia) { showToast(`Max ${maxMedia} item${maxMedia > 1 ? "s" : ""} for ${typeInfo.label}`); return; }
+                  update({ mediaItems: [...mediaItems, { id: `m_${Date.now()}`, url: item.url, type: item.type, thumbnailUrl: item.thumbnailUrl || item.url, order: mediaItems.length }] });
+                  showToast(`${item.type === "video" ? "Video" : "Image"} attached`);
+                  setShowLibrary(false);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3249,18 +3278,270 @@ function PublishedView({ posts, onOpen }) {
 
 // ─── Stub Views (Phases 3–5) ──────────────────────────────────────────────────
 function CommunityView({ communityOrgs, saveCommunityOrgs, showToast }) {
+  const [filter, setFilter] = useState("all");
+  const [modal, setModal] = useState(null); // null | "add" | org object
+  const [form, setForm] = useState({ name: "", type: "partner", url: "", contact: "", notes: "" });
+
+  const ORG_TYPES = [
+    { id: "partner",      label: "Partner",      color: "#DCFCE7", text: "#166534" },
+    { id: "collaborator", label: "Collaborator",  color: "#DBEAFE", text: "#1E40AF" },
+    { id: "prospect",     label: "Prospect",      color: "#FEF9C3", text: "#854D0E" },
+  ];
+
+  const filtered = filter === "all" ? communityOrgs : communityOrgs.filter(o => o.type === filter);
+
+  const openAdd = () => {
+    setForm({ name: "", type: "partner", url: "", contact: "", notes: "" });
+    setModal("add");
+  };
+
+  const openEdit = (org) => {
+    setForm({ name: org.name, type: org.type, url: org.url || "", contact: org.contact || "", notes: org.notes || "" });
+    setModal(org);
+  };
+
+  const save = () => {
+    if (!form.name.trim()) return;
+    if (modal === "add") {
+      saveCommunityOrgs([...communityOrgs, { id: `org_${Date.now()}`, ...form, createdAt: new Date().toISOString() }]);
+      showToast("Org added");
+    } else {
+      saveCommunityOrgs(communityOrgs.map(o => o.id === modal.id ? { ...o, ...form } : o));
+      showToast("Org updated");
+    }
+    setModal(null);
+  };
+
+  const remove = (id) => {
+    saveCommunityOrgs(communityOrgs.filter(o => o.id !== id));
+    showToast("Org removed");
+  };
+
+  const typeInfo = (type) => ORG_TYPES.find(t => t.id === type) || ORG_TYPES[0];
+
   return (
     <div>
-      <div className="page-header"><h2>🤝 Community</h2><p>Partner orgs and collaborators — coming in Phase 5.</p></div>
-      <div className="empty-state"><div className="icon">🤝</div><h3>{communityOrgs.length} orgs saved</h3><p>Full community management coming soon.</p></div>
+      <div className="page-header">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h2>🤝 Community</h2>
+            <p>Partner orgs, collaborators, and prospects.</p>
+          </div>
+          <button className="btn btn-primary" onClick={openAdd}>＋ Add Org</button>
+        </div>
+      </div>
+
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        {[{ id: "all", label: `All (${communityOrgs.length})` }, ...ORG_TYPES.map(t => ({ id: t.id, label: `${t.label} (${communityOrgs.filter(o => o.type === t.id).length})` }))].map(t => (
+          <div key={t.id} className={`tab ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">🤝</div>
+          <h3>{communityOrgs.length === 0 ? "No orgs yet" : "None in this category"}</h3>
+          <p>{communityOrgs.length === 0 ? "Add your first partner or collaborator org." : "Try a different filter."}</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {filtered.map(org => {
+            const t = typeInfo(org.type);
+            return (
+              <div key={org.id} className="card" style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: t.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🏢</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <h4 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>{org.name}</h4>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: t.color, color: t.text }}>{t.label}</span>
+                  </div>
+                  {org.contact && <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 2 }}>👤 {org.contact}</div>}
+                  {org.url && <div style={{ fontSize: 13, color: "var(--sprout-sage)", marginBottom: 2 }}><a href={org.url} target="_blank" rel="noreferrer" style={{ color: "var(--sprout-sage)" }}>🔗 {org.url}</a></div>}
+                  {org.notes && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.5 }}>{org.notes}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => openEdit(org)}>✏️ Edit</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => remove(org.id)}>🗑</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {modal && (
+        <div className="modal-overlay" onClick={() => setModal(null)}>
+          <div className="modal-card" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontFamily: "'Lora', serif", color: "var(--sprout-green)", fontSize: 18 }}>
+                {modal === "add" ? "Add Org" : `Edit — ${modal.name}`}
+              </h3>
+              <button onClick={() => setModal(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)" }}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Org Name *</label>
+                <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. NAMI NYC" autoFocus />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Type</label>
+                <select className="form-select" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                  {ORG_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Contact Person</label>
+                <input className="form-input" value={form.contact} onChange={e => setForm(f => ({ ...f, contact: e.target.value }))} placeholder="Name / email / @handle" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Website / Instagram URL</label>
+                <input className="form-input" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="https://..." />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Notes</label>
+                <textarea className="form-textarea" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Context, partnership history, ideas..." />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={save}>💾 Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-function MediaView({ showToast }) {
+function useMediaLibrary() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const results = [];
+      try {
+        const { data, error: sbErr } = await supabase.storage.from("post-images").list("", { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+        if (!sbErr && data) {
+          const { data: { publicUrl: base } } = supabase.storage.from("post-images").getPublicUrl("");
+          const baseUrl = base.replace(/\/$/, "");
+          data.filter(f => f.name && !f.name.startsWith(".")).forEach(f => {
+            results.push({ id: `sb_${f.id || f.name}`, name: f.name, url: `${baseUrl}/${f.name}`, type: "image", source: "supabase" });
+          });
+        }
+      } catch {}
+      try {
+        const res = await fetch("/api/cloudinary");
+        if (res.ok) {
+          const { resources } = await res.json();
+          (resources || []).forEach(r => {
+            const posterUrl = r.secure_url.replace("/upload/", "/upload/so_0,f_jpg/");
+            results.push({ id: `cl_${r.public_id}`, name: r.public_id.split("/").pop(), url: r.secure_url, thumbnailUrl: posterUrl, type: "video", source: "cloudinary" });
+          });
+        }
+      } catch {}
+      setItems(results);
+      setLoading(false);
+    })();
+  }, []);
+
+  return { items, loading, error };
+}
+
+function MediaPickerGrid({ onAttach, attachLabel = "Attach", selectedIds = [] }) {
+  const { items, loading } = useMediaLibrary();
+  const [filter, setFilter] = useState("all");
+  const [picked, setPicked] = useState(null);
+
+  const filtered = filter === "all" ? items : items.filter(i => i.type === filter);
+
+  const handleAttach = () => {
+    if (!picked) return;
+    onAttach(picked);
+    setPicked(null);
+  };
+
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
+      <div className="big-spinner" style={{ width: 32, height: 32, margin: "0 auto 12px" }} />
+      <p>Loading media library…</p>
+    </div>
+  );
+
   return (
     <div>
-      <div className="page-header"><h2>🖼️ Media</h2><p>Supabase / Cloudinary media browser — coming in Phase 5.</p></div>
-      <div className="empty-state"><div className="icon">🖼️</div><h3>Media Library</h3><p>Browse and attach media to your posts. Coming soon.</p></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          {[{ id: "all", label: `All (${items.length})` }, { id: "image", label: `Images (${items.filter(i => i.type === "image").length})` }, { id: "video", label: `Videos (${items.filter(i => i.type === "video").length})` }].map(t => (
+            <div key={t.id} className={`tab ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>{t.label}</div>
+          ))}
+        </div>
+        {picked && onAttach && (
+          <button className="btn btn-primary btn-sm" onClick={handleAttach}>{attachLabel}</button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty-state" style={{ padding: 32 }}>
+          <div className="icon">🖼️</div>
+          <h3>No media found</h3>
+          <p>Upload images to the post-images bucket or add videos to Cloudinary.</p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+          {filtered.map(item => {
+            const isSelected = picked?.id === item.id || selectedIds.includes(item.id);
+            const thumb = item.thumbnailUrl || item.url;
+            return (
+              <div key={item.id}
+                onClick={() => setPicked(isSelected ? null : item)}
+                style={{ borderRadius: 10, overflow: "hidden", cursor: "pointer", border: isSelected ? "3px solid var(--sprout-green)" : "3px solid transparent", position: "relative", background: "#f0f0f0", aspectRatio: "1" }}>
+                <img src={thumb} alt={item.name}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }} />
+                <div style={{ display: "none", width: "100%", height: "100%", alignItems: "center", justifyContent: "center", fontSize: 32, position: "absolute", top: 0, left: 0, background: "#f0f0f0" }}>
+                  {item.type === "video" ? "🎥" : "🖼️"}
+                </div>
+                {item.type === "video" && (
+                  <div style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>VIDEO</div>
+                )}
+                {isSelected && (
+                  <div style={{ position: "absolute", top: 6, left: 6, background: "var(--sprout-green)", color: "#fff", fontSize: 14, width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✓</div>
+                )}
+                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: 10, padding: "3px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {item.name}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MediaView({ showToast, posts, updatePost }) {
+  const [copyMsg, setCopyMsg] = useState(null);
+
+  const handleAttach = (item) => {
+    const url = item.url;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopyMsg(url);
+      showToast("URL copied to clipboard");
+      setTimeout(() => setCopyMsg(null), 2000);
+    }).catch(() => showToast("Copy failed — paste manually: " + url));
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>🖼️ Media Library</h2>
+        <p>Browse your Supabase images and Cloudinary videos. Click to select, then attach.</p>
+      </div>
+      <div className="card">
+        <MediaPickerGrid onAttach={handleAttach} attachLabel="📋 Copy URL" />
+      </div>
     </div>
   );
 }
