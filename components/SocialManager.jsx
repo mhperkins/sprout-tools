@@ -436,17 +436,19 @@ const Icon = ({ name, size = 16 }) => {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const POST_STATUSES = {
-  draft: { label: "Draft", cls: "badge-draft", icon: "📝" },
-  pending_review: { label: "Pending Review", cls: "badge-pending", icon: "⏳" },
-  approved: { label: "Approved", cls: "badge-approved", icon: "✅" },
+  planned:   { label: "Planned",   cls: "badge-draft",     icon: "🗓️" },
+  draft:     { label: "Draft",     cls: "badge-draft",     icon: "📝" },
+  ready:     { label: "Ready",     cls: "badge-approved",  icon: "✅" },
+  scheduled: { label: "Scheduled", cls: "badge-pending",   icon: "⏰" },
   published: { label: "Published", cls: "badge-published", icon: "🟣" },
 };
 
 const CONTENT_TYPES = [
-  { id: "post", label: "Post", icon: "📷" },
-  { id: "carousel", label: "Carousel", icon: "🎠" },
-  { id: "story", label: "Story", icon: "📱" },
-  { id: "reel", label: "Reel", icon: "🎬" },
+  { id: "image",    label: "Image",    icon: "🖼️",  maxMedia: 1,  publishMethod: "automated" },
+  { id: "video",    label: "Video",    icon: "🎥",  maxMedia: 1,  publishMethod: "manual" },
+  { id: "reel",     label: "Reel",     icon: "🎬",  maxMedia: 1,  publishMethod: "manual" },
+  { id: "carousel", label: "Carousel", icon: "🎠",  maxMedia: 10, publishMethod: "manual" },
+  { id: "story",    label: "Story",    icon: "📱",  maxMedia: 1,  publishMethod: "manual" },
 ];
 
 const CATEGORIES = [
@@ -515,21 +517,20 @@ function rowToPost(row) {
     id: row.id,
     title: row.title || "",
     caption: row.caption || "",
-    contentType: row.content_type || "post",
+    contentType: row.content_type || "image",
     category: row.category || "community",
     status: row.status || "draft",
+    publishMethod: row.publish_method || "manual",
     scheduledAt: row.scheduled_at || "",
     publishedAt: row.published_at || "",
-    imageUrl: row.image_url || "",
+    mediaItems: row.media_items || [],           // [{ id, url, type, thumbnailUrl, order }]
     instagramMediaId: row.instagram_media_id || "",
     likes: row.likes || 0,
     comments: row.comments || 0,
     reach: row.reach || 0,
     hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
     notes: row.notes || "",
-    thumbnailUrl: row.thumbnail_url || "",
-    mediaUrls: row.media_urls || null,
-    mediaType: row.media_type || null,
+    planId: row.plan_id || null,                 // links back to content plan
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),
   };
@@ -541,21 +542,20 @@ function postToRow(post, userId) {
     user_id: userId,
     title: post.title || "",
     caption: post.caption || "",
-    content_type: post.contentType || "post",
+    content_type: post.contentType || "image",
     category: post.category || "community",
     status: post.status || "draft",
+    publish_method: post.publishMethod || "manual",
     scheduled_at: post.scheduledAt || null,
     published_at: post.publishedAt || null,
-    image_url: post.imageUrl || null,
+    media_items: post.mediaItems || [],
     instagram_media_id: post.instagramMediaId || null,
     likes: post.likes || 0,
     comments: post.comments || 0,
     reach: post.reach || 0,
     tags: post.hashtags || [...BRAND_VOICE.brandHashtags],
     notes: post.notes || "",
-    thumbnail_url: post.thumbnailUrl || null,
-    media_urls: post.mediaUrls || null,
-    media_type: post.mediaType || null,
+    plan_id: post.planId || null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -565,11 +565,15 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [view, setView] = useState("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [posts, setPosts] = useState([]);
-  const [editingPost, setEditingPost] = useState(null);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [contentPlans, setContentPlans] = useState([]);     // [{ id, title, createdAt, cards: [...] }]
+  const [communityOrgs, setCommunityOrgs] = useState([]);   // [{ id, name, type, notes, url, ... }]
+  const [strategies, setStrategies] = useState([]);         // [{ id, title, body, createdAt }]
+  const [calendarEvents, setCalendarEvents] = useState([]); // [{ id, title, date, type, notes }]
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Load posts from Supabase ────────────────────────────────────────────
+  // ── Load from Supabase + localStorage ──────────────────────────────────
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase
@@ -577,9 +581,39 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         .select('*')
         .order('created_at', { ascending: false });
       if (!error && data) setPosts(data.map(rowToPost));
+
+      // Local storage for non-post data
+      try {
+        const cp = localStorage.getItem("sm_content_plans");
+        if (cp) setContentPlans(JSON.parse(cp));
+        const co = localStorage.getItem("sm_community_orgs");
+        if (co) setCommunityOrgs(JSON.parse(co));
+        const st = localStorage.getItem("sm_strategies");
+        if (st) setStrategies(JSON.parse(st));
+        const ce = localStorage.getItem("sm_calendar_events");
+        if (ce) setCalendarEvents(JSON.parse(ce));
+      } catch {}
+
       setLoading(false);
     })();
   }, []);
+
+  const saveContentPlans = (updated) => {
+    setContentPlans(updated);
+    try { localStorage.setItem("sm_content_plans", JSON.stringify(updated)); } catch {}
+  };
+  const saveCommunityOrgs = (updated) => {
+    setCommunityOrgs(updated);
+    try { localStorage.setItem("sm_community_orgs", JSON.stringify(updated)); } catch {}
+  };
+  const saveStrategies = (updated) => {
+    setStrategies(updated);
+    try { localStorage.setItem("sm_strategies", JSON.stringify(updated)); } catch {}
+  };
+  const saveCalendarEvents = (updated) => {
+    setCalendarEvents(updated);
+    try { localStorage.setItem("sm_calendar_events", JSON.stringify(updated)); } catch {}
+  };
 
   const showToast = (msg) => {
     setToast(msg);
@@ -654,9 +688,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   // ── Stats ───────────────────────────────────────────────────────────────
   const stats = {
     total: posts.length,
-    drafts: posts.filter(p => p.status === "draft").length,
-    pending: posts.filter(p => p.status === "pending_review").length,
-    approved: posts.filter(p => p.status === "approved").length,
+    planned:   posts.filter(p => p.status === "planned").length,
+    drafts:    posts.filter(p => p.status === "draft").length,
+    ready:     posts.filter(p => p.status === "ready").length,
+    scheduled: posts.filter(p => p.status === "scheduled").length,
     published: posts.filter(p => p.status === "published").length,
     totalEngagement: posts.filter(p => p.status === "published").reduce((s, p) => s + (p.likes || 0) + (p.comments || 0), 0),
   };
@@ -676,130 +711,145 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
       <div className="app">
         {/* ── Sidebar ── */}
         <nav className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
-          <div className="sidebar-logo">
-            {sidebarCollapsed ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 22 }}>🌱</span>
-                <button className="expand-btn" onClick={() => setSidebarCollapsed(false)} title="Expand sidebar">▸</button>
-              </div>
-            ) : (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h1>🌱 Sprout Society</h1>
-                  <p>Social Manager</p>
-                </div>
-                <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar">◂</button>
-              </div>
-            )}
-          </div>
+  <div className="sidebar-logo">
+    {sidebarCollapsed ? (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 22 }}>🌱</span>
+        <button className="expand-btn" onClick={() => setSidebarCollapsed(false)} title="Expand sidebar">▸</button>
+      </div>
+    ) : (
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h1>🌱 Sprout Society</h1>
+          <p>Social Manager</p>
+        </div>
+        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar">◂</button>
+      </div>
+    )}
+  </div>
 
-          <div className="nav-section">
-            <div className="nav-label">Overview</div>
-            <div className={`nav-item ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")} title="Dashboard">
-              <Icon name="dashboard" size={15} /> <span className="nav-text">Dashboard</span>
-            </div>
-          </div>
+  <div className="nav-section">
+    <div className="nav-label">Overview</div>
+    <div className={`nav-item ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")} title="Dashboard">
+      <Icon name="dashboard" size={15} /> <span className="nav-text">Dashboard</span>
+    </div>
+    <div className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => setView("calendar")} title="Calendar">
+      <Icon name="calendar" size={15} /> <span className="nav-text">Calendar</span>
+    </div>
+  </div>
 
-          <div className="nav-section">
-            <div className="nav-label">Content</div>
-            <div className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => setView("calendar")} title="Calendar">
-              <Icon name="calendar" size={15} /> <span className="nav-text">Calendar</span>
-            </div>
-            <div className={`nav-item ${view === "editor" ? "active" : ""}`} onClick={() => { setEditingPost(null); setView("editor"); }} title="New Post">
-              <Icon name="add" size={15} /> <span className="nav-text">New Post</span>
-            </div>
-            <div className={`nav-item ${view === "allPosts" ? "active" : ""}`} onClick={() => setView("allPosts")} title="All Posts">
-              <span style={{ fontSize: 15 }}>📋</span> <span className="nav-text">All Posts</span>
-              {posts.length > 0 && <span className="badge">{posts.length}</span>}
-            </div>
-          </div>
+  <div className="nav-section">
+    <div className="nav-label">Content</div>
+    <div className={`nav-item ${view === "plans" ? "active" : ""}`} onClick={() => setView("plans")} title="Plans">
+      <span style={{ fontSize: 15 }}>🗺️</span> <span className="nav-text">Plans</span>
+      {contentPlans.length > 0 && <span className="badge">{contentPlans.length}</span>}
+    </div>
+    <div className={`nav-item ${view === "myContent" || view === "contentDetail" ? "active" : ""}`} onClick={() => { setSelectedPost(null); setView("myContent"); }} title="My Content">
+      <span style={{ fontSize: 15 }}>📋</span> <span className="nav-text">My Content</span>
+      {posts.filter(p => p.status !== "published").length > 0 && <span className="badge">{posts.filter(p => p.status !== "published").length}</span>}
+    </div>
+    <div className={`nav-item ${view === "published" ? "active" : ""}`} onClick={() => setView("published")} title="Published Content">
+      <span style={{ fontSize: 15 }}>🟣</span> <span className="nav-text">Published</span>
+      {posts.filter(p => p.status === "published").length > 0 && <span className="badge">{posts.filter(p => p.status === "published").length}</span>}
+    </div>
+  </div>
 
-          <div className="nav-section">
-            <div className="nav-label">Workflow</div>
-            <div className={`nav-item ${view === "approvals" ? "active" : ""}`} onClick={() => setView("approvals")} title="Approvals">
-              <Icon name="approve" size={15} /> <span className="nav-text">Approvals</span>
-              {stats.pending > 0 && <span className="badge">{stats.pending}</span>}
-            </div>
-          </div>
+  <div className="nav-section">
+    <div className="nav-label">Insights</div>
+    <div className={`nav-item ${view === "analytics" ? "active" : ""}`} onClick={() => setView("analytics")} title="Analytics">
+      <Icon name="analytics" size={15} /> <span className="nav-text">Analytics</span>
+    </div>
+    <div className={`nav-item ${view === "brandVoice" ? "active" : ""}`} onClick={() => setView("brandVoice")} title="Brand Voice">
+      <Icon name="brand" size={15} /> <span className="nav-text">Brand Voice</span>
+    </div>
+    <div className={`nav-item ${view === "community" ? "active" : ""}`} onClick={() => setView("community")} title="Community">
+      <span style={{ fontSize: 15 }}>🤝</span> <span className="nav-text">Community</span>
+      {communityOrgs.length > 0 && <span className="badge">{communityOrgs.length}</span>}
+    </div>
+  </div>
 
-          <div className="nav-section">
-            <div className="nav-label">Insights</div>
-            <div className={`nav-item ${view === "analytics" ? "active" : ""}`} onClick={() => setView("analytics")} title="Analytics">
-              <Icon name="analytics" size={15} /> <span className="nav-text">Analytics</span>
-            </div>
-           <div className={`nav-item ${view === "brandVoice" ? "active" : ""}`} onClick={() => setView("brandVoice")} title="Brand Voice">
-              <Icon name="brand" size={15} /> <span className="nav-text">Brand Voice</span>
-            </div>
-            <div className={`nav-item ${view === "coach" ? "active" : ""}`} onClick={() => setView("coach")} title="AI Coach">
-              <span style={{ fontSize: 15 }}>🧠</span> <span className="nav-text">AI Coach</span>
-            </div>
-          </div>
+  <div className="nav-section">
+    <div className="nav-label">Library</div>
+    <div className={`nav-item ${view === "media" ? "active" : ""}`} onClick={() => setView("media")} title="Media">
+      <span style={{ fontSize: 15 }}>🖼️</span> <span className="nav-text">Media</span>
+    </div>
+    <div className={`nav-item ${view === "strategies" ? "active" : ""}`} onClick={() => setView("strategies")} title="Strategies">
+      <span style={{ fontSize: 15 }}>🧭</span> <span className="nav-text">Strategies</span>
+      {strategies.length > 0 && <span className="badge">{strategies.length}</span>}
+    </div>
+  </div>
 
-          <div className="sidebar-footer">
-            {!sidebarCollapsed && onSwitchTool && (
-              <button onClick={() => onSwitchTool("home")} style={{
-                background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "6px 12px",
-                fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", width: "100%",
-                marginBottom: 8, display: "flex", alignItems: "center", gap: 6, justifyContent: "center"
-              }}>← Back to Hub</button>
-            )}
-            {userEmail && !sidebarCollapsed && (
-              <div style={{ paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
-                <p style={{ fontSize: 11, marginBottom: 6, color: "rgba(255,255,255,0.4)" }}>👤 {userEmail}</p>
-                <button onClick={onLogout} style={{
-                  background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                  color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "5px 12px",
-                  fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", width: "100%"
-                }}>Log Out</button>
-              </div>
-            )}
-            {sidebarCollapsed && onLogout && (
-              <button onClick={onLogout} title="Log out" style={{
-                background: "none", border: "none", color: "rgba(255,255,255,0.5)",
-                cursor: "pointer", fontSize: 16, padding: 4
-              }}>⏻</button>
-            )}
-          </div>
-        </nav>
+  <div className="sidebar-footer">
+    {!sidebarCollapsed && onSwitchTool && (
+      <button onClick={() => onSwitchTool("home")} style={{
+        background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+        color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "6px 12px",
+        fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", width: "100%",
+        marginBottom: 8, display: "flex", alignItems: "center", gap: 6, justifyContent: "center"
+      }}>← Back to Hub</button>
+    )}
+    {userEmail && !sidebarCollapsed && (
+      <div style={{ paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
+        <p style={{ fontSize: 11, marginBottom: 6, color: "rgba(255,255,255,0.4)" }}>👤 {userEmail}</p>
+        <button onClick={onLogout} style={{
+          background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+          color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "5px 12px",
+          fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", width: "100%"
+        }}>Log Out</button>
+      </div>
+    )}
+    {sidebarCollapsed && onLogout && (
+      <button onClick={onLogout} title="Log out" style={{
+        background: "none", border: "none", color: "rgba(255,255,255,0.5)",
+        cursor: "pointer", fontSize: 16, padding: 4
+      }}>⏻</button>
+    )}
+  </div>
+</nav>
 
         {/* ── Main Content ── */}
         <main className={`main ${sidebarCollapsed ? "collapsed" : ""}`}>
           {view === "dashboard" && (
-            <DashboardView stats={stats} posts={posts} setView={setView} setEditingPost={setEditingPost} />
+            <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} />
           )}
           {view === "calendar" && (
-            <CalendarView posts={posts} setView={setView} setEditingPost={setEditingPost} />
+            <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} />
           )}
-          {view === "editor" && (
-            <EditorView
-              post={editingPost ? posts.find(p => p.id === editingPost) : null}
-              addPost={addPost} updatePost={updatePost} deletePost={deletePost}
-              showToast={showToast} setView={setView} setEditingPost={setEditingPost}
+          {view === "plans" && (
+            <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} />
+          )}
+          {view === "myContent" && (
+            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} />
+          )}
+          {view === "contentDetail" && (
+            <ContentDetailView
+              postId={selectedPost} posts={posts} updatePost={updatePost} deletePost={deletePost}
+              showToast={showToast} onBack={() => setView("myContent")}
               onPublish={handlePublishToInstagram} publishingId={publishingId}
             />
           )}
-          {view === "allPosts" && (
-            <AllPostsView posts={posts} setView={setView} setEditingPost={setEditingPost} deletePost={deletePost} updatePost={updatePost} />
-          )}
-          {view === "approvals" && (
-            <ApprovalsView posts={posts} updatePost={updatePost} showToast={showToast}
-              setView={setView} setEditingPost={setEditingPost}
-              onPublish={handlePublishToInstagram} publishingId={publishingId} />
+          {view === "published" && (
+            <PublishedView posts={posts.filter(p => p.status === "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} />
           )}
           {view === "analytics" && (
             <AnalyticsView posts={posts} />
           )}
           {view === "brandVoice" && (
-  <BrandVoiceView />
-)}
-{view === "coach" && (
-  <CoachView posts={posts} />
-)}
+            <BrandVoiceView />
+          )}
+          {view === "community" && (
+            <CommunityView communityOrgs={communityOrgs} saveCommunityOrgs={saveCommunityOrgs} showToast={showToast} />
+          )}
+          {view === "media" && (
+            <MediaView showToast={showToast} />
+          )}
+          {view === "strategies" && (
+            <StrategiesView strategies={strategies} saveStrategies={saveStrategies} showToast={showToast} />
+          )}
         </main>
 
         {toast && <div className="toast">✓ {toast}</div>}
-        <AIChatOverlay posts={posts} showToast={showToast} />
+        <AIChatOverlay posts={posts} showToast={showToast} contentPlans={contentPlans} saveContentPlans={saveContentPlans} communityOrgs={communityOrgs} saveCommunityOrgs={saveCommunityOrgs} strategies={strategies} saveStrategies={saveStrategies} />
       </div>
     </>
   );
@@ -2158,6 +2208,785 @@ You have live web search. Use it proactively when asked about specific orgs, ben
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── My Content View ─────────────────────────────────────────────────────────
+function MyContentView({ posts, onOpen, showToast, updatePost }) {
+  const [filter, setFilter] = useState("all");
+  const filtered = filter === "all" ? posts : posts.filter(p => p.status === filter);
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>📋 My Content</h2>
+        <p>Track and manage all content in your pipeline.</p>
+      </div>
+
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        {[
+          { id: "all",       label: `All (${posts.length})` },
+          { id: "planned",   label: `Planned (${posts.filter(p => p.status === "planned").length})` },
+          { id: "draft",     label: `Draft (${posts.filter(p => p.status === "draft").length})` },
+          { id: "ready",     label: `Ready (${posts.filter(p => p.status === "ready").length})` },
+          { id: "scheduled", label: `Scheduled (${posts.filter(p => p.status === "scheduled").length})` },
+        ].map(t => (
+          <div key={t.id} className={`tab ${filter === t.id ? "active" : ""}`} onClick={() => setFilter(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">🌱</div>
+          <h3>{posts.length === 0 ? "No content yet" : "None in this status"}</h3>
+          <p>{posts.length === 0 ? "Create a content plan to get started." : "Try a different filter."}</p>
+        </div>
+      ) : filtered.map(post => {
+        const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+        const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
+        return (
+          <div key={post.id} className="post-card" onClick={() => onOpen(post.id)}>
+            <div className="post-thumb">
+              {thumb ? <img src={thumb} alt="" onError={e => e.target.style.display = "none"} /> : <span>{typeInfo.icon}</span>}
+            </div>
+            <div className="post-info">
+              <h4>{post.title || "Untitled"}</h4>
+              <div className="caption-preview">{post.caption || "No caption yet"}</div>
+              <div className="post-meta">
+                <span style={{ fontSize: 11, fontWeight: 700, background: "var(--sprout-warm)", color: "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10 }}>
+                  {typeInfo.icon} {typeInfo.label}
+                </span>
+                {post.contentType === "carousel" && (post.mediaItems?.length > 0) && (
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{post.mediaItems.length} slides</span>
+                )}
+                <span className="tag tag-gray">{CATEGORIES.find(c => c.id === post.category)?.label || post.category}</span>
+                {post.scheduledAt && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>📅 {formatDate(post.scheduledAt)}</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+              {statusBadge(post.status)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Content Detail Sub-Tabs ──────────────────────────────────────────────────
+function ContentOverviewTab({ post, update, showToast }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    title: post.title, contentType: post.contentType,
+    category: post.category, scheduledAt: post.scheduledAt || "",
+  });
+  const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+  const done = (post.todos || []).filter(t => t.done).length;
+  const total = (post.todos || []).length;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const save = () => { update(form); setEditing(false); showToast("Details saved"); };
+
+  if (editing) return (
+    <div className="card">
+      <h3 className="section-title">Edit Details</h3>
+      <div className="form-grid">
+        <div className="form-group">
+          <label className="form-label">Title</label>
+          <input className="form-input" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Content Type</label>
+          <select className="form-select" value={form.contentType} onChange={e => setForm(f => ({ ...f, contentType: e.target.value }))}>
+            {CONTENT_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Category</label>
+          <select className="form-select" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+            {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Scheduled Date</label>
+          <input className="form-input" type="datetime-local" value={form.scheduledAt?.slice(0, 16) || ""} onChange={e => setForm(f => ({ ...f, scheduledAt: e.target.value }))} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="btn btn-primary" onClick={save}>Save</button>
+        <button className="btn btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+          <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0, fontSize: 15 }}>Content Details</h3>
+          <button className="btn btn-secondary btn-sm" style={{ padding: "4px 10px" }} onClick={() => setEditing(true)}>✏️</button>
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          {[
+            ["Type", `${typeInfo.icon} ${typeInfo.label}`],
+            ["Category", CATEGORIES.find(c => c.id === post.category)?.label || post.category],
+            ["Publish Method", post.publishMethod === "automated" ? "⚡ Automated" : "✋ Manual"],
+            ["Scheduled", post.scheduledAt ? formatDate(post.scheduledAt) : "Not scheduled"],
+            ["Created", formatDate(post.createdAt)],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 1 }}>{k}</div>
+              <div style={{ fontSize: 13, color: "var(--text-primary)" }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 className="section-title" style={{ marginBottom: 12, borderBottom: "none", paddingBottom: 0, fontSize: 15 }}>Progress</h3>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 13 }}>Tasks completed</span>
+            <span style={{ fontWeight: 700, fontSize: 18, color: "var(--sprout-green)" }}>{pct}%</span>
+          </div>
+          <div className="progress-bar" style={{ height: 12, borderRadius: 6 }}>
+            <div className="progress-fill" style={{ width: `${pct}%`, borderRadius: 6 }} />
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>{done} of {total} tasks done</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 className="section-title" style={{ marginBottom: 12, borderBottom: "none", paddingBottom: 0, fontSize: 15 }}>Media Preview</h3>
+        {post.mediaItems?.length > 0 ? (
+          <div>
+            <img src={post.mediaItems[0].thumbnailUrl || post.mediaItems[0].url} alt=""
+              style={{ width: "100%", borderRadius: 8, objectFit: "cover", maxHeight: 130 }}
+              onError={e => e.target.style.display = "none"} />
+            {post.mediaItems.length > 1 && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
+                +{post.mediaItems.length - 1} more {post.contentType === "carousel" ? "slides" : "items"}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "28px 0", color: "var(--text-muted)", fontSize: 13 }}>No media yet</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContentTasksTab({ post, update, showToast }) {
+  const [newTask, setNewTask] = useState("");
+  const [newPriority, setNewPriority] = useState("med");
+  const todos = post.todos || [];
+  const DEFAULT_TASKS = [
+    { id: `dt_${Date.now()}_1`, text: "Write caption", priority: "high", done: false },
+    { id: `dt_${Date.now()}_2`, text: "Prepare media assets", priority: "high", done: false },
+    { id: `dt_${Date.now()}_3`, text: "Review hashtags", priority: "med", done: false },
+    { id: `dt_${Date.now()}_4`, text: "Final review before publish", priority: "med", done: false },
+  ];
+  const addTask = () => {
+    if (!newTask.trim()) return;
+    update({ todos: [...todos, { id: `t_${Date.now()}`, text: newTask, priority: newPriority, done: false }] });
+    setNewTask(""); showToast("Task added");
+  };
+  const toggleTask = (id) => update({ todos: todos.map(t => t.id === id ? { ...t, done: !t.done } : t) });
+  const deleteTask = (id) => update({ todos: todos.filter(t => t.id !== id) });
+
+  return (
+    <div className="card">
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
+        <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>Tasks</h3>
+        {todos.length === 0 && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { update({ todos: DEFAULT_TASKS }); showToast("Default tasks added"); }}>
+            ✨ Add Default Tasks
+          </button>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <input className="form-input" style={{ flex: 1 }} placeholder="Add a task..." value={newTask}
+          onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()} />
+        <select className="form-select" style={{ width: 110 }} value={newPriority} onChange={e => setNewPriority(e.target.value)}>
+          <option value="high">🔴 High</option>
+          <option value="med">🟡 Med</option>
+          <option value="low">🟢 Low</option>
+        </select>
+        <button className="btn btn-primary" onClick={addTask}>Add</button>
+      </div>
+      {todos.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No tasks yet.</div>
+      ) : todos.map(t => (
+        <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+          <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+          <span style={{ flex: 1, textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text-muted)" : "var(--text-primary)", fontSize: 14 }}>{t.text}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: t.priority === "high" ? "var(--sprout-coral)" : t.priority === "med" ? "var(--sprout-gold)" : "var(--sprout-sage)" }}>
+            {t.priority?.toUpperCase()}
+          </span>
+          <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 14 }} onClick={() => deleteTask(t.id)}>🗑</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CaptionMediaTab({ post, update, showToast }) {
+  const [caption, setCaption] = useState(post.caption || "");
+  const [hashtags, setHashtags] = useState(post.hashtags || [...BRAND_VOICE.brandHashtags]);
+  const [newTag, setNewTag] = useState("");
+  const [newMediaUrl, setNewMediaUrl] = useState("");
+  const [newMediaType, setNewMediaType] = useState("image");
+  const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+  const maxMedia = typeInfo.maxMedia || 1;
+  const mediaItems = post.mediaItems || [];
+
+  const saveCaption = () => { update({ caption, hashtags }); showToast("Caption saved"); };
+
+  const addMedia = () => {
+    if (!newMediaUrl.trim()) return;
+    if (mediaItems.length >= maxMedia) { showToast(`Max ${maxMedia} item${maxMedia > 1 ? "s" : ""} for ${typeInfo.label}`); return; }
+    update({ mediaItems: [...mediaItems, { id: `m_${Date.now()}`, url: newMediaUrl.trim(), type: newMediaType, thumbnailUrl: newMediaUrl.trim(), order: mediaItems.length }] });
+    setNewMediaUrl(""); showToast("Media added");
+  };
+
+  const removeMedia = (id) => update({ mediaItems: mediaItems.filter(m => m.id !== id) });
+
+  const moveMedia = (id, dir) => {
+    const idx = mediaItems.findIndex(m => m.id === id);
+    if (dir === "up" && idx === 0) return;
+    if (dir === "down" && idx === mediaItems.length - 1) return;
+    const arr = [...mediaItems];
+    const swap = dir === "up" ? idx - 1 : idx + 1;
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    update({ mediaItems: arr.map((m, i) => ({ ...m, order: i })) });
+  };
+
+  const addTag = () => {
+    const tag = newTag.trim().startsWith("#") ? newTag.trim() : `#${newTag.trim()}`;
+    if (!newTag.trim() || hashtags.includes(tag)) return;
+    setHashtags(h => [...h, tag]); setNewTag("");
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 className="section-title" style={{ marginBottom: 12, borderBottom: "none", paddingBottom: 0 }}>Caption</h3>
+        <textarea className="form-textarea" style={{ minHeight: 120, marginBottom: 10 }} value={caption}
+          onChange={e => setCaption(e.target.value)} placeholder="Write your caption here..." />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{caption.length} characters</span>
+          <button className="btn btn-primary btn-sm" onClick={saveCaption}>💾 Save Caption</button>
+        </div>
+
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+            Hashtags ({hashtags.length})
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {hashtags.map(tag => (
+              <span key={tag} className="hashtag-chip">
+                {tag}
+                <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 12, padding: "0 0 0 4px" }}
+                  onClick={() => setHashtags(h => h.filter(x => x !== tag))}>✕</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input className="form-input" style={{ flex: 1 }} value={newTag}
+              onChange={e => setNewTag(e.target.value)} onKeyDown={e => e.key === "Enter" && addTag()} placeholder="#hashtag" />
+            <button className="btn btn-secondary btn-sm" onClick={addTag}>Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>
+            {typeInfo.icon} Media ({mediaItems.length}/{maxMedia})
+          </h3>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {post.contentType === "carousel" ? "Up to 10 slides · drag to reorder" : "Single asset"}
+          </span>
+        </div>
+
+        {mediaItems.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {mediaItems.map((item, idx) => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--sprout-cream)", borderRadius: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", minWidth: 20 }}>#{idx + 1}</span>
+                <img src={item.thumbnailUrl || item.url} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} onError={e => e.target.style.display = "none"} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{item.type === "video" ? "🎥 Video" : "🖼️ Image"}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
+                </div>
+                {post.contentType === "carousel" && (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button className="btn btn-secondary btn-sm" style={{ padding: "2px 8px" }} onClick={() => moveMedia(item.id, "up")} disabled={idx === 0}>↑</button>
+                    <button className="btn btn-secondary btn-sm" style={{ padding: "2px 8px" }} onClick={() => moveMedia(item.id, "down")} disabled={idx === mediaItems.length - 1}>↓</button>
+                  </div>
+                )}
+                <button className="btn btn-danger btn-sm" onClick={() => removeMedia(item.id)}>🗑</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {mediaItems.length < maxMedia && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <select className="form-select" style={{ width: 110 }} value={newMediaType} onChange={e => setNewMediaType(e.target.value)}>
+              <option value="image">🖼️ Image</option>
+              <option value="video">🎥 Video</option>
+            </select>
+            <input className="form-input" style={{ flex: 1 }} value={newMediaUrl}
+              onChange={e => setNewMediaUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && addMedia()}
+              placeholder="https://res.cloudinary.com/..." />
+            <button className="btn btn-primary btn-sm" onClick={addMedia}>Add</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContentNotesTab({ post, update, showToast }) {
+  const [notes, setNotes] = useState(post.notes || "");
+  return (
+    <div className="card">
+      <h3 className="section-title">Notes</h3>
+      <textarea className="form-textarea" style={{ minHeight: 200, marginBottom: 14 }} value={notes}
+        onChange={e => setNotes(e.target.value)} placeholder="Add notes, context, or reminders for this post..." />
+      <button className="btn btn-primary btn-sm" onClick={() => { update({ notes }); showToast("Notes saved"); }}>💾 Save Notes</button>
+    </div>
+  );
+}
+
+// ─── Content Detail View ──────────────────────────────────────────────────────
+function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId }) {
+  const [tab, setTab] = useState("overview");
+  const post = posts.find(p => p.id === postId);
+  if (!post) return <div className="empty-state"><p>Content not found.</p></div>;
+
+  const update = (changes) => updatePost(post.id, changes);
+  const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+  const doneTasks = (post.todos || []).filter(t => t.done).length;
+  const totalTasks = (post.todos || []).length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 16 }}>← Back to My Content</button>
+
+        <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid var(--border)", boxShadow: "var(--shadow)", marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14 }}>
+            <div>
+              <div style={{ fontFamily: "Lora, serif", fontSize: 24, fontWeight: 700, color: "var(--sprout-green)", marginBottom: 4 }}>
+                {post.title || "Untitled"}
+              </div>
+              <div style={{ color: "var(--text-secondary)", fontSize: 14, marginBottom: 10 }}>
+                {typeInfo.icon} {typeInfo.label} · {CATEGORIES.find(c => c.id === post.category)?.label || post.category}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {statusBadge(post.status)}
+                {post.scheduledAt && <span style={{ fontSize: 13, color: "var(--text-muted)" }}>📅 {formatDate(post.scheduledAt)}</span>}
+                <span style={{ fontSize: 11, background: post.publishMethod === "automated" ? "#DCFCE7" : "var(--sprout-warm)", color: post.publishMethod === "automated" ? "#166534" : "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>
+                  {post.publishMethod === "automated" ? "⚡ Automated" : "✋ Manual"}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <select className="form-select" style={{ width: 160 }} value={post.status}
+                onChange={e => { update({ status: e.target.value }); showToast("Status updated"); }}>
+                <option value="planned">🗓️ Planned</option>
+                <option value="draft">📝 Draft</option>
+                <option value="ready">✅ Ready</option>
+                <option value="scheduled">⏰ Scheduled</option>
+                <option value="published">🟣 Published</option>
+              </select>
+              {post.status === "ready" && post.publishMethod === "automated" && (
+                <button className="btn btn-primary" onClick={() => onPublish(post)} disabled={publishingId === post.id}>
+                  {publishingId === post.id ? <><div className="spinner" /> Publishing…</> : <>📤 Publish to Instagram</>}
+                </button>
+              )}
+              <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Delete this post?")) { deletePost(post.id); onBack(); } }}>🗑 Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="tabs">
+        {[
+          { id: "overview",     label: "Overview" },
+          { id: "tasks",        label: `Tasks (${doneTasks}/${totalTasks})` },
+          { id: "captionMedia", label: "Caption & Media" },
+          { id: "notes",        label: "Notes" },
+        ].map(t => (
+          <div key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {tab === "overview"     && <ContentOverviewTab post={post} update={update} showToast={showToast} />}
+      {tab === "tasks"        && <ContentTasksTab post={post} update={update} showToast={showToast} />}
+      {tab === "captionMedia" && <CaptionMediaTab post={post} update={update} showToast={showToast} />}
+      {tab === "notes"        && <ContentNotesTab post={post} update={update} showToast={showToast} />}
+    </div>
+  );
+}
+
+// ─── Plans View ───────────────────────────────────────────────────────────────
+function PlansView({ contentPlans, saveContentPlans, posts, addPost, showToast, communityOrgs, calendarEvents, saveCommunityOrgs, saveStrategies, strategies }) {
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [messages, setMessages] = useState([{ role: "assistant", content: "Hi! I'm your content planning coach. Tell me your goals and I'll create a detailed content plan. 🗺️\n\nI can:\n• Build a multi-week content plan\n• Create an event or campaign plan\n• Develop an overall strategy\n• Find partner orgs to collaborate with\n\nWhenever I produce something worth saving, I'll ask you before adding it anywhere." }]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const endDiv = useRef(null);
+  useEffect(() => { endDiv.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, typing]);
+
+  const buildContext = () => {
+    const pipeline = posts.filter(p => p.status !== "published").map(p => `${p.title} (${p.status})`).join(", ") || "none";
+    const events = calendarEvents.map(e => `${e.date}: ${e.title}`).join(", ") || "none";
+    const orgs = communityOrgs.map(o => o.name).join(", ") || "none";
+    return `You are the AI content planning coach for Sprout Society — a peer mental wellness nonprofit in Brooklyn, NY.
+
+MISSION: Build community and foster connection for mental wellness.
+BRAND VOICE: ${BRAND_VOICE.tone}
+CONTENT GOALS: 1. Event attendance 2. Space rentals 3. Calendar listings 4. Donor acquisition 5. Community growth
+
+CURRENT PIPELINE: ${pipeline}
+CALENDAR EVENTS: ${events}
+COMMUNITY ORGS: ${orgs}
+
+CONTENT TYPES: image (⚡ automated publish), video, reel, carousel (up to 10 slides), story (manual publish)
+
+ROUTING ACTIONS — when producing structured output, append a JSON block like:
+For a content plan:
+\`\`\`action
+{"type":"propose_plan","planTitle":"...","cards":[{"title":"...","contentType":"image|video|reel|carousel|story","category":"community|event|educational|promotional|behind_scenes|testimonial","suggestedDate":"YYYY-MM-DD","captionBrief":"...","hashtags":["#tag"],"notes":"..."}]}
+\`\`\`
+For a strategy doc:
+\`\`\`action
+{"type":"propose_strategy","title":"...","body":"..."}
+\`\`\`
+For community orgs:
+\`\`\`action
+{"type":"propose_community","orgs":[{"name":"...","type":"partner|collaborator","notes":"...","url":""}]}
+\`\`\`
+
+CRITICAL: Always ask the user what they'd like to do with your output. Never assume they want to save it. The app will show confirmation buttons inline.`;
+  };
+
+  const sendMessage = async (text) => {
+    const userText = (text || input).trim();
+    if (!userText || typing) return;
+    setInput("");
+    const newMessages = [...messages, { role: "user", content: userText }];
+    setMessages(newMessages);
+    setTyping(true);
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514", max_tokens: 3000,
+          system: buildContext(),
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+        }),
+      });
+      const data = await res.json();
+      const fullText = data.content?.filter(i => i.type === "text").map(i => i.text).join("") || "Sorry, something went wrong.";
+      const actionMatch = fullText.match(/```action\n([\s\S]*?)\n```/);
+      const displayText = fullText.replace(/```action\n[\s\S]*?\n```/g, "").trim();
+      if (actionMatch) {
+        try {
+          const action = JSON.parse(actionMatch[1]);
+          setMessages(prev => [...prev, { role: "assistant", content: displayText, action, resolved: false }]);
+        } catch {
+          setMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+        }
+      } else {
+        setMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "Something went wrong. Please check your connection." }]);
+    }
+    setTyping(false);
+  };
+
+  const commitAction = (msgIdx, action, choice) => {
+    if (choice !== "skip") {
+      if (action.type === "propose_plan" && (choice === "plan" || choice === "both")) {
+        const plan = { id: `plan_${Date.now()}`, title: action.planTitle || "Content Plan", cards: action.cards || [], createdAt: new Date().toISOString() };
+        saveContentPlans([...contentPlans, plan]);
+        showToast(`Plan "${plan.title}" saved!`);
+      }
+      if (action.type === "propose_strategy" && (choice === "strategy" || choice === "both")) {
+        const strat = { id: `strat_${Date.now()}`, title: action.title || "Strategy", body: action.body || "", createdAt: new Date().toISOString(), source: "AI Content Coach" };
+        saveStrategies([...strategies, strat]);
+        showToast(`Strategy "${strat.title}" saved!`);
+      }
+      if (action.type === "propose_community") {
+        const newOrgs = (action.orgs || []).map(o => ({ ...o, id: `org_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`, addedAt: new Date().toISOString() }));
+        saveCommunityOrgs([...communityOrgs, ...newOrgs]);
+        showToast(`${newOrgs.length} org${newOrgs.length !== 1 ? "s" : ""} added to Community!`);
+      }
+    }
+    setMessages(prev => prev.map((m, i) => i === msgIdx ? { ...m, resolved: true, resolvedChoice: choice } : m));
+  };
+
+  const addCardToContent = async (card) => {
+    const typeInfo = CONTENT_TYPES.find(t => t.id === card.contentType) || CONTENT_TYPES[0];
+    await addPost({
+      title: card.title, caption: card.captionBrief || "",
+      contentType: card.contentType || "image", category: card.category || "community",
+      status: "planned", publishMethod: typeInfo.publishMethod || "manual",
+      scheduledAt: card.suggestedDate ? `${card.suggestedDate}T12:00:00` : "",
+      hashtags: card.hashtags || [...BRAND_VOICE.brandHashtags],
+      notes: card.notes || "", mediaItems: [],
+    });
+  };
+
+  const addAllCards = async (plan) => {
+    for (const card of plan.cards) await addCardToContent(card);
+    showToast(`${plan.cards.length} posts added to My Content!`);
+  };
+
+  const renderContent = (text) => text.split("\n").map((line, i, arr) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+      p.startsWith("**") && p.endsWith("**") ? <strong key={j}>{p.slice(2, -2)}</strong> : p
+    );
+    return <span key={i}>{parts}{i < arr.length - 1 && <br />}</span>;
+  });
+
+  const PLAN_SUGGESTIONS = [
+    { icon: "📅", label: "4-week plan",    prompt: "Create a 4-week content plan for Sprout Society. Mix content types and align to our 5 goals." },
+    { icon: "🎪", label: "Event promo",    prompt: "Create a content plan to promote an upcoming Sprout Society community event." },
+    { icon: "💝", label: "Donor campaign", prompt: "Build a 2-week Instagram donor acquisition campaign for us." },
+    { icon: "🤝", label: "Find partners",  prompt: "Search for Brooklyn mental health and wellness orgs that would make good Sprout Society collaborators." },
+    { icon: "🧭", label: "Strategy doc",   prompt: "Create an overall content strategy for Sprout Society for the next quarter." },
+    { icon: "🏠", label: "Space rental",   prompt: "Create content to market the Sprout Society space for event rentals." },
+  ];
+
+  return (
+    <div style={{ display: "flex", gap: 20, height: "calc(100vh - 48px)", overflow: "hidden" }}>
+
+      {/* ── Left: Saved Plans ── */}
+      <div style={{ width: 260, minWidth: 260, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+        <div className="card" style={{ padding: 16, marginBottom: 0 }}>
+          <div className="section-title" style={{ marginBottom: 12 }}>🗺️ Saved Plans ({contentPlans.length})</div>
+          {contentPlans.length === 0 ? (
+            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>No plans yet. Chat with the AI to create one.</p>
+          ) : contentPlans.map(plan => (
+            <div key={plan.id}
+              style={{ padding: "10px 12px", borderRadius: 10, cursor: "pointer", marginBottom: 8, transition: "all 0.15s", background: selectedPlan?.id === plan.id ? "var(--sprout-sage)" : "var(--sprout-cream)", color: selectedPlan?.id === plan.id ? "#fff" : "var(--text-primary)", border: `1px solid ${selectedPlan?.id === plan.id ? "var(--sprout-sage)" : "var(--border)"}` }}
+              onClick={() => setSelectedPlan(selectedPlan?.id === plan.id ? null : plan)}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{plan.title}</div>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>{plan.cards.length} posts · {new Date(plan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+            </div>
+          ))}
+        </div>
+
+        {selectedPlan && (
+          <div className="card" style={{ padding: 16, marginBottom: 0, flex: 1, overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontFamily: "Lora, serif", fontSize: 15, fontWeight: 700, color: "var(--sprout-green)" }}>{selectedPlan.title}</div>
+              <button className="btn btn-primary btn-sm" onClick={() => addAllCards(selectedPlan)}>Add All</button>
+            </div>
+            {selectedPlan.cards.map((card, i) => {
+              const ti = CONTENT_TYPES.find(t => t.id === card.contentType) || CONTENT_TYPES[0];
+              return (
+                <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{card.title}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{ti.icon} {ti.label} · {card.suggestedDate || "No date"}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{card.captionBrief}</div>
+                    </div>
+                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8, flexShrink: 0 }}
+                      onClick={() => addCardToContent(card).then(() => showToast("Added to My Content!"))}>＋</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Right: AI Chat ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", minWidth: 0 }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, background: "var(--sprout-green)", flexShrink: 0 }}>
+          <div style={{ fontSize: 22 }}>🗺️</div>
+          <div>
+            <div style={{ fontFamily: "Lora, serif", fontWeight: 700, fontSize: 16, color: "var(--sprout-lime)" }}>Content Planning Coach</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Sprout Society · AI-Powered</div>
+          </div>
+          <button onClick={() => setMessages([{ role: "assistant", content: "Cleared! What would you like to plan? 🗺️" }])}
+            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
+            Clear
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {messages.map((m, i) => (
+            <div key={i}>
+              <div style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+                <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, background: m.role === "assistant" ? "var(--sprout-sage)" : "var(--sprout-sky)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>
+                  {m.role === "assistant" ? "🗺️" : "👤"}
+                </div>
+                <div style={{ maxWidth: "76%", padding: "10px 15px", lineHeight: 1.75, fontSize: 14, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", background: m.role === "user" ? "var(--sprout-green)" : "var(--sprout-cream)", color: m.role === "user" ? "#fff" : "var(--text-primary)" }}>
+                  {renderContent(m.content)}
+                </div>
+              </div>
+              {m.action && !m.resolved && (
+                <div style={{ marginLeft: 40, marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {m.action.type === "propose_plan" && <>
+                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "plan")}>＋ Add to Plans</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                  </>}
+                  {m.action.type === "propose_strategy" && <>
+                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "strategy")}>🧭 Save as Strategy</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                  </>}
+                  {m.action.type === "propose_community" && <>
+                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "community")}>🤝 Add to Community</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                  </>}
+                </div>
+              )}
+              {m.resolved && (
+                <div style={{ marginLeft: 40, marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  {m.resolvedChoice !== "skip" ? "✓ Saved" : "✕ Skipped"}
+                </div>
+              )}
+            </div>
+          ))}
+          {typing && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--sprout-sage)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🗺️</div>
+              <div style={{ padding: "10px 15px", borderRadius: "4px 12px 12px 12px", background: "var(--sprout-cream)" }}>
+                <div className="chat-typing"><span /><span /><span /></div>
+              </div>
+            </div>
+          )}
+          <div ref={endDiv} />
+        </div>
+
+        {messages.length <= 1 && (
+          <div className="chat-suggestions-scroll">
+            {PLAN_SUGGESTIONS.map((s, i) => (
+              <button key={i} className="chat-suggestion-chip" onClick={() => sendMessage(s.prompt)}>{s.icon} {s.label}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="chat-input-row">
+          <textarea className="chat-input" placeholder="Describe your goals, ask for a plan, or request partner research…" value={input}
+            onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} rows={1} />
+          <button className="chat-send" onClick={() => sendMessage()} disabled={!input.trim() || typing}>➤</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Published View ───────────────────────────────────────────────────────────
+function PublishedView({ posts, onOpen }) {
+  const sorted = [...posts].sort((a, b) => new Date(b.publishedAt || b.updatedAt) - new Date(a.publishedAt || a.updatedAt));
+  const totalEng = posts.reduce((s, p) => s + (p.likes || 0) + (p.comments || 0), 0);
+  const avgReach = posts.length > 0 ? Math.round(posts.reduce((s, p) => s + (p.reach || 0), 0) / posts.length) : 0;
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>🟣 Published Content</h2>
+        <p>All content published to Instagram.</p>
+      </div>
+
+      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: 28 }}>
+        <div className="stat-card"><div className="label">Published</div><div className="value">{posts.length}</div><div className="sub">total posts</div></div>
+        <div className="stat-card"><div className="label">Total Engagement</div><div className="value">{totalEng.toLocaleString()}</div><div className="sub">likes + comments</div></div>
+        <div className="stat-card"><div className="label">Avg Reach</div><div className="value">{avgReach.toLocaleString()}</div><div className="sub">per post</div></div>
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">🟣</div>
+          <h3>No published content yet</h3>
+          <p>Posts published to Instagram will appear here.</p>
+        </div>
+      ) : sorted.map(post => {
+        const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+        const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
+        return (
+          <div key={post.id} className="post-card" onClick={() => onOpen(post.id)}>
+            <div className="post-thumb">
+              {thumb ? <img src={thumb} alt="" onError={e => e.target.style.display = "none"} /> : <span>{typeInfo.icon}</span>}
+            </div>
+            <div className="post-info">
+              <h4>{post.title || "Untitled"}</h4>
+              <div className="caption-preview">{post.caption || ""}</div>
+              <div className="post-meta">
+                <span style={{ fontSize: 11, fontWeight: 700, background: "var(--sprout-warm)", color: "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10 }}>{typeInfo.icon} {typeInfo.label}</span>
+                {post.publishedAt && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>📅 {formatDate(post.publishedAt)}</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 20, alignItems: "center", flexShrink: 0 }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontWeight: 700, color: "var(--sprout-coral)", fontSize: 16 }}>{post.likes || 0}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>likes</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontWeight: 700, color: "var(--sprout-sky)", fontSize: 16 }}>{post.comments || 0}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>comments</div>
+              </div>
+              {post.reach > 0 && (
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontWeight: 700, color: "var(--sprout-sage)", fontSize: 16 }}>{post.reach.toLocaleString()}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>reach</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Stub Views (Phases 3–5) ──────────────────────────────────────────────────
+function CommunityView({ communityOrgs, saveCommunityOrgs, showToast }) {
+  return (
+    <div>
+      <div className="page-header"><h2>🤝 Community</h2><p>Partner orgs and collaborators — coming in Phase 5.</p></div>
+      <div className="empty-state"><div className="icon">🤝</div><h3>{communityOrgs.length} orgs saved</h3><p>Full community management coming soon.</p></div>
+    </div>
+  );
+}
+function MediaView({ showToast }) {
+  return (
+    <div>
+      <div className="page-header"><h2>🖼️ Media</h2><p>Supabase / Cloudinary media browser — coming in Phase 5.</p></div>
+      <div className="empty-state"><div className="icon">🖼️</div><h3>Media Library</h3><p>Browse and attach media to your posts. Coming soon.</p></div>
+    </div>
+  );
+}
+function StrategiesView({ strategies, saveStrategies, showToast }) {
+  return (
+    <div>
+      <div className="page-header"><h2>🧭 Strategies</h2><p>{strategies.length} strategies saved from the AI coach.</p></div>
+      {strategies.length === 0 ? (
+        <div className="empty-state"><div className="icon">🧭</div><h3>No strategies yet</h3><p>Ask the AI coach to create a strategy and save it here.</p></div>
+      ) : strategies.map(s => (
+        <div key={s.id} className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <h3 style={{ fontFamily: "Lora, serif", fontSize: 16, color: "var(--sprout-green)" }}>{s.title}</h3>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+              <button className="btn btn-danger btn-sm" onClick={() => { saveStrategies(strategies.filter(x => x.id !== s.id)); showToast("Strategy deleted"); }}>🗑</button>
+            </div>
+          </div>
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{s.body}</p>
+        </div>
+      ))}
     </div>
   );
 }
