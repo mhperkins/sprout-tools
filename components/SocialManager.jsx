@@ -181,10 +181,13 @@ const styles = `
     cursor: pointer; font-weight: 500; transition: opacity 0.1s; display: block;
   }
   .cal-chip:hover { opacity: 0.8; }
-  .cal-chip.draft { background: var(--draft-bg); color: var(--draft-text); }
-  .cal-chip.pending_review { background: var(--pending-bg); color: var(--pending-text); }
-  .cal-chip.approved { background: var(--approved-bg); color: var(--approved-text); }
+  .cal-chip.planned   { background: #E8F5E9; color: #2E7D32; }
+  .cal-chip.draft     { background: var(--draft-bg); color: var(--draft-text); }
+  .cal-chip.ready     { background: var(--approved-bg); color: var(--approved-text); }
+  .cal-chip.scheduled { background: var(--scheduled-bg); color: var(--scheduled-text); }
   .cal-chip.published { background: var(--published-bg); color: var(--published-text); }
+  .cal-chip.event     { background: #FFF3E0; color: #E65100; }
+  .cal-legend-item { cursor: pointer; transition: opacity 0.15s; user-select: none; }
 
   .ig-mock {
     background: #fff; border: 1px solid #dbdbdb; border-radius: 8px;
@@ -1125,35 +1128,83 @@ function DashboardView({ stats, posts, setView, setEditingPost }) {
 }
 
 // ─── Calendar View ───────────────────────────────────────────────────────────
-function CalendarView({ posts, setView, setEditingPost }) {
+function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setSelectedPost }) {
   const [calDate, setCalDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [hiddenStatuses, setHiddenStatuses] = useState(new Set());
+  const [newEvent, setNewEvent] = useState({ title: "", notes: "" });
+  const [addingEvent, setAddingEvent] = useState(false);
+
   const year = calDate.getFullYear();
   const month = calDate.getMonth();
   const days = getMonthDays(year, month);
   const today = new Date();
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
+  const getDateStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+
   const getPostsForDay = (d) => {
     if (d.other) return [];
-    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+    const dateStr = getDateStr(d);
     return posts.filter(p => {
       const pDate = p.scheduledAt || p.publishedAt || p.createdAt;
       return pDate && pDate.startsWith(dateStr);
     });
   };
 
+  const getEventsForDay = (d) => {
+    if (d.other) return [];
+    return (calendarEvents || []).filter(e => e.date === getDateStr(d));
+  };
+
+  const toggleStatus = (key) => {
+    setHiddenStatuses(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  const openDay = (d) => {
+    if (d.other) return;
+    setSelectedDay({ dateStr: getDateStr(d), day: d.day });
+    setAddingEvent(false);
+    setNewEvent({ title: "", notes: "" });
+  };
+
+  const closeModal = () => setSelectedDay(null);
+
+  const deleteEvent = (id) => saveCalendarEvents((calendarEvents || []).filter(e => e.id !== id));
+
+  const saveNewEvent = () => {
+    if (!newEvent.title.trim()) return;
+    saveCalendarEvents([...(calendarEvents || []), {
+      id: `evt_${Date.now()}`,
+      title: newEvent.title.trim(),
+      notes: newEvent.notes.trim(),
+      date: selectedDay.dateStr,
+      type: "manual",
+    }]);
+    setNewEvent({ title: "", notes: "" });
+    setAddingEvent(false);
+  };
+
+  const modalPosts = selectedDay ? posts.filter(p => {
+    const pDate = p.scheduledAt || p.publishedAt || p.createdAt;
+    return pDate && pDate.startsWith(selectedDay.dateStr);
+  }) : [];
+  const modalEvents = selectedDay ? (calendarEvents || []).filter(e => e.date === selectedDay.dateStr) : [];
+
+  const legendItems = [
+    ...Object.entries(POST_STATUSES),
+    ["event", { label: "Manual Event", icon: "📌" }],
+  ];
+
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <h2>📅 Content Calendar</h2>
-            <p>Plan and visualize your content schedule at a glance.</p>
-          </div>
-          <button className="btn btn-primary" onClick={() => { setEditingPost(null); setView("editor"); }}>
-            <Icon name="add" /> New Post
-          </button>
-        </div>
+        <h2>📅 Content Calendar</h2>
+        <p>Click any day to view items, add events, or navigate to content.</p>
       </div>
 
       <div className="card">
@@ -1170,36 +1221,131 @@ function CalendarView({ posts, setView, setEditingPost }) {
             <div key={d} className="cal-day-hdr">{d}</div>
           ))}
           {days.map((d, i) => {
-            const dayPosts = getPostsForDay(d);
+            const dayPosts = getPostsForDay(d).filter(p => !hiddenStatuses.has(p.status));
+            const dayEvents = getEventsForDay(d).filter(() => !hiddenStatuses.has("event"));
+            const totalVisible = dayPosts.length + dayEvents.length;
+            const shownPosts = dayPosts.slice(0, 2);
+            const shownEvents = dayEvents.slice(0, Math.max(0, 2 - shownPosts.length));
+            const overflow = totalVisible - shownPosts.length - shownEvents.length;
             const isToday = !d.other && d.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
             return (
               <div key={i} className={`cal-cell ${d.other ? "other" : ""} ${isToday ? "today" : ""}`}
-                onClick={() => { if (!d.other) { setEditingPost(null); setView("editor"); } }}>
+                style={{ cursor: d.other ? "default" : "pointer" }}
+                onClick={() => openDay(d)}>
                 <div className={`cal-date-num ${isToday ? "today" : ""}`}>{d.day}</div>
-                {dayPosts.slice(0, 3).map(p => (
+                {shownPosts.map(p => (
                   <div key={p.id} className={`cal-chip ${p.status}`}
-                    onClick={(e) => { e.stopPropagation(); setEditingPost(p.id); setView("editor"); }}
+                    onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setView("contentDetail"); }}
                     title={p.title || p.caption?.slice(0, 40)}>
-                    {truncate(p.title || p.caption, 16)}
+                    {truncate(p.title || p.caption, 14)}
                   </div>
                 ))}
-                {dayPosts.length > 3 && (
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>+{dayPosts.length - 3} more</div>
+                {shownEvents.map(ev => (
+                  <div key={ev.id} className="cal-chip event" title={ev.title}>
+                    📌 {truncate(ev.title, 11)}
+                  </div>
+                ))}
+                {overflow > 0 && (
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>+{overflow} more</div>
                 )}
               </div>
             );
           })}
         </div>
 
-        <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-          {Object.entries(POST_STATUSES).map(([key, val]) => (
-            <div key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-              <span className={`tag ${val.cls}`} style={{ fontSize: 10, padding: "1px 6px" }}>{val.icon}</span>
-              <span style={{ color: "var(--text-muted)" }}>{val.label}</span>
+        {/* Toggleable filter legend */}
+        <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginRight: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Show:</span>
+          {legendItems.map(([key, val]) => (
+            <div key={key} className="cal-legend-item"
+              onClick={() => toggleStatus(key)}
+              style={{ opacity: hiddenStatuses.has(key) ? 0.3 : 1 }}
+              title={hiddenStatuses.has(key) ? `Show ${val.label}` : `Hide ${val.label}`}>
+              <span className={`cal-chip ${key}`} style={{ margin: 0, display: "inline-block" }}>
+                {val.icon} {val.label}
+              </span>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Day Modal */}
+      {selectedDay && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-card" style={{ width: 460, maxWidth: "95vw" }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontFamily: "'Lora', serif", color: "var(--sprout-green)", fontSize: 18 }}>
+                {monthNames[month]} {selectedDay.day}, {year}
+              </h3>
+              <button onClick={closeModal} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)", lineHeight: 1 }}>✕</button>
+            </div>
+
+            <div className="modal-body" style={{ maxHeight: 440, overflowY: "auto" }}>
+              {modalPosts.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Content</div>
+                  {modalPosts.map(p => (
+                    <div key={p.id}
+                      onClick={() => { setSelectedPost(p.id); setView("contentDetail"); closeModal(); }}
+                      onMouseOver={e => e.currentTarget.style.background = "var(--sprout-cream)"}
+                      onMouseOut={e => e.currentTarget.style.background = "#fafafa"}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, cursor: "pointer", background: "#fafafa", transition: "background 0.1s" }}>
+                      <span className={`cal-chip ${p.status}`} style={{ margin: 0, flexShrink: 0 }}>
+                        {POST_STATUSES[p.status]?.icon} {POST_STATUSES[p.status]?.label}
+                      </span>
+                      <span style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.title || truncate(p.caption, 40) || "Untitled"}
+                      </span>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>→</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {modalEvents.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Events</div>
+                  {modalEvents.map(ev => (
+                    <div key={ev.id} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, background: "#fafafa" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>📌 {ev.title}</div>
+                        {ev.notes && <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3 }}>{ev.notes}</div>}
+                      </div>
+                      <button onClick={() => deleteEvent(ev.id)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#B91C1C", fontSize: 14, padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {modalPosts.length === 0 && modalEvents.length === 0 && (
+                <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center", padding: "16px 0" }}>Nothing scheduled for this day.</p>
+              )}
+
+              {addingEvent ? (
+                <div style={{ padding: 14, borderRadius: 8, background: "var(--sprout-cream)", border: "1px solid var(--border)", marginTop: 8 }}>
+                  <input className="form-input" placeholder="Event title *"
+                    value={newEvent.title} onChange={e => setNewEvent(p => ({ ...p, title: e.target.value }))}
+                    style={{ marginBottom: 8 }} autoFocus
+                    onKeyDown={e => e.key === "Enter" && saveNewEvent()} />
+                  <input className="form-input" placeholder="Notes (optional)"
+                    value={newEvent.notes} onChange={e => setNewEvent(p => ({ ...p, notes: e.target.value }))}
+                    style={{ marginBottom: 10 }} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={saveNewEvent}>Save</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setAddingEvent(false)}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn btn-outline btn-sm" onClick={() => setAddingEvent(true)}
+                  style={{ width: "100%", justifyContent: "center", marginTop: 4 }}>
+                  + Add Event
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
