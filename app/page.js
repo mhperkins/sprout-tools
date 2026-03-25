@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { initWindowStorage, setStorageUser } from "@/lib/storage";
-import GrantTool from "@/components/GrantTool";
+import GrantTool from "@/components/GrantManager";
 import SocialManager from "@/components/SocialManager";
 
 export default function Home() {
