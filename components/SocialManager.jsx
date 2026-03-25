@@ -410,6 +410,46 @@ const styles = `
     box-shadow: 0 20px 60px rgba(0,0,0,0.25); text-align: center;
   }
 
+  .notif-bell {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; padding: 8px; border-radius: 8px; transition: background 0.15s;
+  }
+  .notif-bell:hover { background: rgba(255,255,255,0.08); }
+  .notif-badge {
+    position: absolute; top: 2px; right: 2px; min-width: 18px; height: 18px;
+    background: var(--sprout-coral); color: #fff; border-radius: 10px;
+    font-size: 10px; font-weight: 800; display: flex; align-items: center;
+    justify-content: center; padding: 0 4px; border: 2px solid var(--sprout-green);
+  }
+  .notif-panel {
+    position: fixed; top: 0; right: 0; width: 380px; height: 100vh; background: #fff;
+    box-shadow: -8px 0 32px rgba(0,0,0,0.12); z-index: 200; display: flex;
+    flex-direction: column; animation: notifSlide 0.22s ease;
+  }
+  @keyframes notifSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  .notif-header {
+    padding: 20px 20px 16px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .notif-header h3 { font-family: 'Lora', serif; font-size: 18px; color: var(--sprout-green); }
+  .notif-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .notif-item {
+    display: flex; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #f3f4f6;
+    cursor: pointer; transition: background 0.12s;
+  }
+  .notif-item:hover { background: var(--sprout-cream); }
+  .notif-item.unread { background: rgba(122,158,91,0.06); }
+  .notif-item.unread:hover { background: rgba(122,158,91,0.1); }
+  .notif-icon-wrap {
+    width: 36px; height: 36px; border-radius: 10px; display: flex;
+    align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
+  }
+  .notif-content { flex: 1; min-width: 0; }
+  .notif-content h4 { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.4; }
+  .notif-content p { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+  .notif-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+  .notif-empty { text-align: center; padding: 48px 20px; color: var(--text-muted); }
+
   @media (max-width: 768px) {
     .sidebar { width: 200px; min-width: 200px; }
     .sidebar.collapsed { width: 48px; min-width: 48px; }
@@ -570,6 +610,8 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [communityOrgs, setCommunityOrgs] = useState([]);   // [{ id, name, type, notes, url, ... }]
   const [strategies, setStrategies] = useState([]);         // [{ id, title, body, createdAt }]
   const [calendarEvents, setCalendarEvents] = useState([]); // [{ id, title, date, type, notes }]
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -592,6 +634,8 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         if (st) setStrategies(JSON.parse(st));
         const ce = localStorage.getItem("sm_calendar_events");
         if (ce) setCalendarEvents(JSON.parse(ce));
+        const no = localStorage.getItem("sm_notifications");
+        if (no) setNotifications(JSON.parse(no));
       } catch {}
 
       setLoading(false);
@@ -614,6 +658,51 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
     setCalendarEvents(updated);
     try { localStorage.setItem("sm_calendar_events", JSON.stringify(updated)); } catch {}
   };
+
+  const saveNotifications = (updated) => {
+    setNotifications(updated);
+    try { localStorage.setItem("sm_notifications", JSON.stringify(updated)); } catch {}
+  };
+
+  const addNotification = (notif) => {
+    setNotifications(prev => {
+      const updated = [{ id: `notif_${Date.now()}_${Math.random().toString(36).slice(2,5)}`, read: false, createdAt: new Date().toISOString(), ...notif }, ...prev].slice(0, 50);
+      try { localStorage.setItem("sm_notifications", JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  };
+
+  // Scheduled post reminders — check hourly
+  useEffect(() => {
+    if (loading) return;
+    const checkScheduled = () => {
+      const now = new Date();
+      posts.forEach(p => {
+        if (!p.scheduledAt || p.status === "published") return;
+        const diff = Math.ceil((new Date(p.scheduledAt) - now) / 3600000);
+        const key24 = `sched_24h_${p.id}`;
+        const key1  = `sched_1h_${p.id}`;
+        if (diff <= 24 && diff > 1) {
+          setNotifications(prev => {
+            if (prev.some(n => n.key === key24)) return prev;
+            const updated = [{ id: `notif_${Date.now()}`, key: key24, read: false, createdAt: now.toISOString(), title: `📅 "${p.title || "Post"}" scheduled in ~${diff}h`, body: `${CONTENT_TYPES.find(t => t.id === p.contentType)?.label || p.contentType} · ${formatDate(p.scheduledAt)}`, icon: "📅", iconBg: "#FEF9C3", postId: p.id }, ...prev].slice(0, 50);
+            try { localStorage.setItem("sm_notifications", JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        } else if (diff <= 1 && diff >= 0) {
+          setNotifications(prev => {
+            if (prev.some(n => n.key === key1)) return prev;
+            const updated = [{ id: `notif_${Date.now()}`, key: key1, read: false, createdAt: now.toISOString(), title: `🚨 "${p.title || "Post"}" goes live within 1 hour!`, body: `Make sure it's ready to publish.`, icon: "🚨", iconBg: "#FEE2E2", postId: p.id }, ...prev].slice(0, 50);
+            try { localStorage.setItem("sm_notifications", JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        }
+      });
+    };
+    checkScheduled();
+    const interval = setInterval(checkScheduled, 3600000);
+    return () => clearInterval(interval);
+  }, [posts, loading]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -723,7 +812,15 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
           <h1>🌱 Sprout Society</h1>
           <p>Social Manager</p>
         </div>
-        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar">◂</button>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <div className="notif-bell" onClick={() => setShowNotifPanel(p => !p)}>
+                    <span style={{ fontSize: 18 }}>🔔</span>
+                    {notifications.filter(n => !n.read).length > 0 && (
+                      <span className="notif-badge">{notifications.filter(n => !n.read).length}</span>
+                    )}
+                  </div>
+                  <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar">◂</button>
+                </div>
       </div>
     )}
   </div>
@@ -849,6 +946,60 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         </main>
 
         {toast && <div className="toast">✓ {toast}</div>}
+
+        {showNotifPanel && (
+          <>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.15)", zIndex: 199 }} onClick={() => setShowNotifPanel(false)} />
+            <div className="notif-panel">
+              <div className="notif-header">
+                <h3>🔔 Notifications</h3>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {notifications.some(n => !n.read) && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => saveNotifications(notifications.map(n => ({ ...n, read: true })))}>
+                      Mark all read
+                    </button>
+                  )}
+                  <button style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--text-muted)" }} onClick={() => setShowNotifPanel(false)}>✕</button>
+                </div>
+              </div>
+              <div className="notif-list">
+                {notifications.length === 0 ? (
+                  <div className="notif-empty">
+                    <div style={{ fontSize: 36, marginBottom: 8 }}>🔔</div>
+                    <p>No notifications yet</p>
+                    <p style={{ fontSize: 12, marginTop: 4 }}>Scheduled post reminders and coach alerts will appear here.</p>
+                  </div>
+                ) : notifications.map(n => (
+                  <div key={n.id} className={`notif-item ${!n.read ? "unread" : ""}`}
+                    onClick={() => {
+                      saveNotifications(notifications.map(x => x.id === n.id ? { ...x, read: true } : x));
+                      setShowNotifPanel(false);
+                    }}>
+                    <div className="notif-icon-wrap" style={{ background: n.iconBg || "var(--sprout-cream)" }}>{n.icon || "🔔"}</div>
+                    <div className="notif-content">
+                      <h4>{n.title}</h4>
+                      {n.body && <p>{n.body}</p>}
+                    </div>
+                    <div className="notif-time">{(() => {
+                      const mins = Math.floor((Date.now() - new Date(n.createdAt)) / 60000);
+                      if (mins < 1) return "now";
+                      if (mins < 60) return `${mins}m`;
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return `${hrs}h`;
+                      return `${Math.floor(hrs / 24)}d`;
+                    })()}</div>
+                  </div>
+                ))}
+              </div>
+              {notifications.length > 0 && (
+                <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", textAlign: "center" }}>
+                  <button className="btn btn-danger btn-sm" onClick={() => saveNotifications([])}>Clear All</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         <AIChatOverlay posts={posts} showToast={showToast} contentPlans={contentPlans} saveContentPlans={saveContentPlans} communityOrgs={communityOrgs} saveCommunityOrgs={saveCommunityOrgs} strategies={strategies} saveStrategies={saveStrategies} />
       </div>
     </>
