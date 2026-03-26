@@ -606,6 +606,9 @@ function postToRow(post, userId) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [view, setView] = useState("dashboard");
+  const [prevView, setPrevView] = useState("myContent");
+  const [calView, setCalView] = useState("month");
+  const [calDate, setCalDate] = useState(new Date());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -914,19 +917,20 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} setSelectedPost={setSelectedPost} />
           )}
           {view === "calendar" && (
-            <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} />
+            <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} calView={calView} setCalView={setCalView} setPrevView={setPrevView} calDate={calDate} setCalDate={setCalDate} />
           )}
           {view === "plans" && (
             <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} />
           )}
           {view === "myContent" && (
-            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setSelectedPost(id); setView("contentDetail"); }} />
+            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} />
           )}
           {view === "contentDetail" && (
             <ContentDetailView
               postId={selectedPost} posts={posts} updatePost={updatePost} deletePost={deletePost}
-              showToast={showToast} onBack={() => setView("myContent")}
+              showToast={showToast} onBack={(dest) => setView(dest || prevView)}
               onPublish={handlePublishToInstagram} publishingId={publishingId}
+              prevView={prevView}
             />
           )}
           {view === "published" && (
@@ -1127,9 +1131,7 @@ function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost })
 }
 
 // ─── Calendar View ───────────────────────────────────────────────────────────
-function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setSelectedPost }) {
-  const [calDate, setCalDate] = useState(new Date());
-  const [calView, setCalView] = useState("month");
+function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setSelectedPost, calView, setCalView, setPrevView, calDate, setCalDate }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [activeCategories, setActiveCategories] = useState(new Set());
   const [newEvent, setNewEvent] = useState({ title: "", notes: "", recurrence: "none" });
@@ -1303,7 +1305,7 @@ const confirmRecurringAction = (scope) => {
                   <div className={`cal-date-num ${isToday ? "today" : ""}`}>{d.day}</div>
                   {shownPosts.map(p => (
                     <div key={p.id} className={`cal-chip ${p.status}`}
-                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setView("contentDetail"); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setPrevView("calendar"); setView("contentDetail"); }}
                       title={p.title || p.caption?.slice(0, 40)}>
                       {truncate(p.title || p.caption, 14)}
                     </div>
@@ -1367,7 +1369,7 @@ const confirmRecurringAction = (scope) => {
                 <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>Nothing scheduled for this day.</p>
               )}
               {dPosts.map(p => (
-                <div key={p.id} onClick={() => { setSelectedPost(p.id); setView("contentDetail"); }}
+                <div key={p.id} onClick={() => { setSelectedPost(p.id); setPrevView("calendar"); setView("contentDetail"); }}
                   style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, cursor: "pointer", background: "#fafafa" }}
                   onMouseOver={e => e.currentTarget.style.background = "var(--sprout-cream)"}
                   onMouseOut={e => e.currentTarget.style.background = "#fafafa"}>
@@ -1453,7 +1455,7 @@ const confirmRecurringAction = (scope) => {
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Content</div>
                   {modalPosts.map(p => (
                     <div key={p.id}
-                      onClick={() => { setSelectedPost(p.id); setView("contentDetail"); closeModal(); }}
+                      onClick={() => { setSelectedPost(p.id); setPrevView("calendar"); setView("contentDetail"); closeModal(); }}
                       onMouseOver={e => e.currentTarget.style.background = "var(--sprout-cream)"}
                       onMouseOut={e => e.currentTarget.style.background = "#fafafa"}
                       style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, cursor: "pointer", background: "#fafafa", transition: "background 0.1s" }}>
@@ -3131,7 +3133,7 @@ function ContentNotesTab({ post, update, showToast }) {
 }
 
 // ─── Content Detail View ──────────────────────────────────────────────────────
-function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId }) {
+function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId, prevView }) {
   const [tab, setTab] = useState("overview");
   const post = posts.find(p => p.id === postId);
   if (!post) return <div className="empty-state"><p>Content not found.</p></div>;
@@ -3144,7 +3146,10 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 16 }}>← Back to My Content</button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+  <button className="btn btn-secondary btn-sm" onClick={() => onBack("calendar")}>← Back to Calendar</button>
+  <button className="btn btn-secondary btn-sm" onClick={() => onBack("myContent")}>← Back to My Content</button>
+</div>
 
         <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid var(--border)", boxShadow: "var(--shadow)", marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14 }}>
