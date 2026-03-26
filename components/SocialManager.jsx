@@ -1130,9 +1130,10 @@ function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost })
 function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setSelectedPost }) {
   const [calDate, setCalDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
-  const [hiddenStatuses, setHiddenStatuses] = useState(new Set());
-  const [newEvent, setNewEvent] = useState({ title: "", notes: "" });
+  const [activeCategories, setActiveCategories] = useState(new Set());
+  const [newEvent, setNewEvent] = useState({ title: "", notes: "", recurrence: "none" });
   const [addingEvent, setAddingEvent] = useState(false);
+  const [recurringPrompt, setRecurringPrompt] = useState(null); // { mode: "edit"|"delete", event }
 
   const year = calDate.getFullYear();
   const month = calDate.getMonth();
@@ -1157,12 +1158,12 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
   };
 
   const toggleStatus = (key) => {
-    setHiddenStatuses(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
-  };
+  setActiveCategories(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+};
 
   const openDay = (d) => {
     if (d.other) return;
@@ -1173,20 +1174,61 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
 
   const closeModal = () => setSelectedDay(null);
 
-  const deleteEvent = (id) => saveCalendarEvents((calendarEvents || []).filter(e => e.id !== id));
+ const deleteEvent = (ev) => {
+  if (ev.recurrenceId) {
+    setRecurringPrompt({ mode: "delete", event: ev });
+  } else {
+    saveCalendarEvents((calendarEvents || []).filter(e => e.id !== ev.id));
+  }
+};
+
+const confirmRecurringAction = (scope) => {
+  const { mode, event } = recurringPrompt;
+  if (mode === "delete") {
+    if (scope === "all") {
+      saveCalendarEvents((calendarEvents || []).filter(e => e.recurrenceId !== event.recurrenceId));
+    } else {
+      saveCalendarEvents((calendarEvents || []).filter(e => e.id !== event.id));
+    }
+  }
+  setRecurringPrompt(null);
+  setSelectedDay(null);
+};
 
   const saveNewEvent = () => {
-    if (!newEvent.title.trim()) return;
-    saveCalendarEvents([...(calendarEvents || []), {
-      id: `evt_${Date.now()}`,
-      title: newEvent.title.trim(),
-      notes: newEvent.notes.trim(),
-      date: selectedDay.dateStr,
-      type: "manual",
-    }]);
-    setNewEvent({ title: "", notes: "" });
-    setAddingEvent(false);
+  if (!newEvent.title.trim()) return;
+  const recurrenceId = newEvent.recurrence !== "none" ? `rec_${Date.now()}` : null;
+  const base = {
+    title: newEvent.title.trim(),
+    notes: newEvent.notes.trim(),
+    type: "manual",
+    recurrence: newEvent.recurrence,
+    ...(recurrenceId ? { recurrenceId } : {}),
   };
+  const instances = [];
+  if (newEvent.recurrence === "none") {
+    instances.push({ ...base, id: `evt_${Date.now()}`, date: selectedDay.dateStr });
+  } else {
+    const steps = { daily: 1, weekly: 7, monthly: null };
+    const count = 12;
+    let cursor = new Date(selectedDay.dateStr);
+    for (let i = 0; i < count; i++) {
+      instances.push({
+        ...base,
+        id: `evt_${Date.now()}_${i}`,
+        date: cursor.toISOString().slice(0, 10),
+      });
+      if (newEvent.recurrence === "monthly") {
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate());
+      } else {
+        cursor.setDate(cursor.getDate() + steps[newEvent.recurrence]);
+      }
+    }
+  }
+  saveCalendarEvents([...(calendarEvents || []), ...instances]);
+  setNewEvent({ title: "", notes: "", recurrence: "none" });
+  setAddingEvent(false);
+};
 
   const modalPosts = selectedDay ? posts.filter(p => {
     const pDate = p.scheduledAt || p.publishedAt || p.createdAt;
@@ -1220,8 +1262,8 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
             <div key={d} className="cal-day-hdr">{d}</div>
           ))}
           {days.map((d, i) => {
-            const dayPosts = getPostsForDay(d).filter(p => !hiddenStatuses.has(p.status));
-            const dayEvents = getEventsForDay(d).filter(() => !hiddenStatuses.has("event"));
+            const dayPosts = getPostsForDay(d).filter(p => activeCategories.size === 0 || activeCategories.has(p.status));
+            const dayEvents = getEventsForDay(d).filter(() => activeCategories.size === 0 || activeCategories.has("event"));
             const totalVisible = dayPosts.length + dayEvents.length;
             const shownPosts = dayPosts.slice(0, 2);
             const shownEvents = dayEvents.slice(0, Math.max(0, 2 - shownPosts.length));
@@ -1254,12 +1296,12 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
 
         {/* Toggleable filter legend */}
         <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginRight: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Show:</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginRight: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Filter:</span>
           {legendItems.map(([key, val]) => (
             <div key={key} className="cal-legend-item"
               onClick={() => toggleStatus(key)}
-              style={{ opacity: hiddenStatuses.has(key) ? 0.3 : 1 }}
-              title={hiddenStatuses.has(key) ? `Show ${val.label}` : `Hide ${val.label}`}>
+              style={{ opacity: activeCategories.size > 0 && !activeCategories.has(key) ? 0.3 : 1 }}
+              title={activeCategories.has(key) ? `Deactivate ${val.label}` : `Filter to ${val.label}`}>
               <span className={`cal-chip ${key}`} style={{ margin: 0, display: "inline-block" }}>
                 {val.icon} {val.label}
               </span>
@@ -1267,6 +1309,33 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
           ))}
         </div>
       </div>
+
+      {/* Recurring Event Prompt */}
+      {recurringPrompt && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setRecurringPrompt(null)}>
+  <div className="modal-card" style={{ width: 380, maxWidth: "95vw" }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontFamily: "'Lora', serif", color: "var(--sprout-green)", fontSize: 17 }}>
+                {recurringPrompt.mode === "delete" ? "Delete Recurring Event" : "Edit Recurring Event"}
+              </h3>
+              <button onClick={() => setRecurringPrompt(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)" }}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 20 }}>
+                "{recurringPrompt.event.title}" is part of a recurring series. What would you like to {recurringPrompt.mode}?
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => confirmRecurringAction("this")}>
+                  This event only
+                </button>
+                <button className="btn btn-primary" style={{ flex: 1, background: "#B91C1C", borderColor: "#B91C1C" }} onClick={() => confirmRecurringAction("all")}>
+                  All events in series
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Day Modal */}
       {selectedDay && (
@@ -1310,7 +1379,7 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
                         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>📌 {ev.title}</div>
                         {ev.notes && <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3 }}>{ev.notes}</div>}
                       </div>
-                      <button onClick={() => deleteEvent(ev.id)}
+                      <button onClick={() => deleteEvent(ev)}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#B91C1C", fontSize: 14, padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>✕</button>
                     </div>
                   ))}
@@ -1329,7 +1398,15 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
                     onKeyDown={e => e.key === "Enter" && saveNewEvent()} />
                   <input className="form-input" placeholder="Notes (optional)"
                     value={newEvent.notes} onChange={e => setNewEvent(p => ({ ...p, notes: e.target.value }))}
-                    style={{ marginBottom: 10 }} />
+                    style={{ marginBottom: 8 }} />
+                  <select className="form-input" value={newEvent.recurrence}
+                    onChange={e => setNewEvent(p => ({ ...p, recurrence: e.target.value }))}
+                    style={{ marginBottom: 10 }}>
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily (12 days)</option>
+                    <option value="weekly">Weekly (12 weeks)</option>
+                    <option value="monthly">Monthly (12 months)</option>
+                  </select>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn btn-primary btn-sm" onClick={saveNewEvent}>Save</button>
                     <button className="btn btn-secondary btn-sm" onClick={() => setAddingEvent(false)}>Cancel</button>
