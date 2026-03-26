@@ -1129,6 +1129,7 @@ function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost })
 // ─── Calendar View ───────────────────────────────────────────────────────────
 function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setSelectedPost }) {
   const [calDate, setCalDate] = useState(new Date());
+  const [calView, setCalView] = useState("month");
   const [selectedDay, setSelectedDay] = useState(null);
   const [activeCategories, setActiveCategories] = useState(new Set());
   const [newEvent, setNewEvent] = useState({ title: "", notes: "", recurrence: "none" });
@@ -1142,6 +1143,10 @@ function CalendarView({ posts, calendarEvents, saveCalendarEvents, setView, setS
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   const getDateStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  const dateObjToStr = (d) => d.toISOString().slice(0, 10);
+  const getPostsByStr = (dateStr) => posts.filter(p => { const pd = p.scheduledAt || p.publishedAt || p.createdAt; return pd && pd.startsWith(dateStr); });
+  const getEventsByStr = (dateStr) => (calendarEvents || []).filter(e => e.date === dateStr);
+  const getWeekDays = () => { const dow = calDate.getDay(); const sun = new Date(calDate); sun.setDate(calDate.getDate() - dow); return Array.from({ length: 7 }, (_, i) => { const d = new Date(sun); d.setDate(sun.getDate() + i); return d; }); };
 
   const getPostsForDay = (d) => {
     if (d.other) return [];
@@ -1249,50 +1254,144 @@ const confirmRecurringAction = (scope) => {
       </div>
 
       <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setCalDate(new Date(year, month - 1))}>← Prev</button>
-          <h3 style={{ fontFamily: "'Lora', serif", fontSize: 20, color: "var(--sprout-green)" }}>
-            {monthNames[month]} {year}
-          </h3>
-          <button className="btn btn-secondary btn-sm" onClick={() => setCalDate(new Date(year, month + 1))}>Next →</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => {
+            if (calView === "month") setCalDate(new Date(year, month - 1));
+            else if (calView === "week") { const d = new Date(calDate); d.setDate(d.getDate() - 7); setCalDate(d); }
+            else { const d = new Date(calDate); d.setDate(d.getDate() - 1); setCalDate(d); }
+          }}>← Prev</button>
+          <div style={{ textAlign: "center" }}>
+            <h3 style={{ fontFamily: "'Lora', serif", fontSize: 20, color: "var(--sprout-green)", marginBottom: 8 }}>
+              {calView === "month" && `${monthNames[month]} ${year}`}
+              {calView === "week" && (() => { const wd = getWeekDays(); return `${monthNames[wd[0].getMonth()]} ${wd[0].getDate()} – ${monthNames[wd[6].getMonth()]} ${wd[6].getDate()}, ${wd[6].getFullYear()}`; })()}
+              {calView === "day" && `${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][calDate.getDay()]}, ${monthNames[month]} ${calDate.getDate()}, ${year}`}
+            </h3>
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              {["month","week","day"].map(v => (
+                <button key={v} onClick={() => setCalView(v)}
+                  style={{ padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1.5px solid var(--sprout-sage)", background: calView === v ? "var(--sprout-sage)" : "transparent", color: calView === v ? "#fff" : "var(--sprout-sage)", textTransform: "capitalize", transition: "all 0.15s" }}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={() => {
+            if (calView === "month") setCalDate(new Date(year, month + 1));
+            else if (calView === "week") { const d = new Date(calDate); d.setDate(d.getDate() + 7); setCalDate(d); }
+            else { const d = new Date(calDate); d.setDate(d.getDate() + 1); setCalDate(d); }
+          }}>Next →</button>
         </div>
 
-        <div className="cal-grid">
-          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
-            <div key={d} className="cal-day-hdr">{d}</div>
-          ))}
-          {days.map((d, i) => {
-            const dayPosts = getPostsForDay(d).filter(p => activeCategories.size === 0 || activeCategories.has(p.status));
-            const dayEvents = getEventsForDay(d).filter(() => activeCategories.size === 0 || activeCategories.has("event"));
-            const totalVisible = dayPosts.length + dayEvents.length;
-            const shownPosts = dayPosts.slice(0, 2);
-            const shownEvents = dayEvents.slice(0, Math.max(0, 2 - shownPosts.length));
-            const overflow = totalVisible - shownPosts.length - shownEvents.length;
-            const isToday = !d.other && d.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-            return (
-              <div key={i} className={`cal-cell ${d.other ? "other" : ""} ${isToday ? "today" : ""}`}
-                style={{ cursor: d.other ? "default" : "pointer" }}
-                onClick={() => openDay(d)}>
-                <div className={`cal-date-num ${isToday ? "today" : ""}`}>{d.day}</div>
-                {shownPosts.map(p => (
-                  <div key={p.id} className={`cal-chip ${p.status}`}
-                    onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setView("contentDetail"); }}
-                    title={p.title || p.caption?.slice(0, 40)}>
-                    {truncate(p.title || p.caption, 14)}
+        {/* ── Month View ── */}
+        {calView === "month" && (
+          <div className="cal-grid">
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
+              <div key={d} className="cal-day-hdr">{d}</div>
+            ))}
+            {days.map((d, i) => {
+              const dayPosts = getPostsForDay(d).filter(p => activeCategories.size === 0 || activeCategories.has(p.status));
+              const dayEvents = getEventsForDay(d).filter(() => activeCategories.size === 0 || activeCategories.has("event"));
+              const totalVisible = dayPosts.length + dayEvents.length;
+              const shownPosts = dayPosts.slice(0, 2);
+              const shownEvents = dayEvents.slice(0, Math.max(0, 2 - shownPosts.length));
+              const overflow = totalVisible - shownPosts.length - shownEvents.length;
+              const isToday = !d.other && d.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+              return (
+                <div key={i} className={`cal-cell ${d.other ? "other" : ""} ${isToday ? "today" : ""}`}
+                  style={{ cursor: d.other ? "default" : "pointer" }}
+                  onClick={() => openDay(d)}>
+                  <div className={`cal-date-num ${isToday ? "today" : ""}`}>{d.day}</div>
+                  {shownPosts.map(p => (
+                    <div key={p.id} className={`cal-chip ${p.status}`}
+                      onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setView("contentDetail"); }}
+                      title={p.title || p.caption?.slice(0, 40)}>
+                      {truncate(p.title || p.caption, 14)}
+                    </div>
+                  ))}
+                  {shownEvents.map(ev => (
+                    <div key={ev.id} className="cal-chip event" title={ev.title}>
+                      📌 {truncate(ev.title, 11)}
+                    </div>
+                  ))}
+                  {overflow > 0 && <div style={{ fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>+{overflow} more</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Week View ── */}
+        {calView === "week" && (() => {
+          const weekDays = getWeekDays();
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+              {weekDays.map((d, i) => {
+                const dateStr = dateObjToStr(d);
+                const wPosts = getPostsByStr(dateStr).filter(p => activeCategories.size === 0 || activeCategories.has(p.status));
+                const wEvents = getEventsByStr(dateStr).filter(() => activeCategories.size === 0 || activeCategories.has("event"));
+                const isToday = dateStr === dateObjToStr(today);
+                return (
+                  <div key={i} onClick={() => { setSelectedDay({ dateStr, day: d.getDate() }); setAddingEvent(false); setNewEvent({ title: "", notes: "", recurrence: "none" }); }}
+                    style={{ minHeight: 120, border: `1.5px solid ${isToday ? "var(--sprout-sage)" : "var(--border)"}`, borderRadius: 8, padding: 6, cursor: "pointer", background: isToday ? "rgba(122,158,91,0.07)" : "#fff", transition: "background 0.1s" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: isToday ? "var(--sprout-sage)" : "var(--text-muted)", marginBottom: 4, textAlign: "center" }}>
+                      {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()]}
+                      <span style={{ display: "block", fontSize: 16, color: isToday ? "var(--sprout-green)" : "var(--text-primary)", fontWeight: isToday ? 700 : 400 }}>{d.getDate()}</span>
+                    </div>
+                    {wPosts.map(p => (
+                      <div key={p.id} className={`cal-chip ${p.status}`}
+                        onClick={(e) => { e.stopPropagation(); setSelectedPost(p.id); setView("contentDetail"); }}
+                        style={{ marginBottom: 2 }}>
+                        {truncate(p.title || p.caption, 12)}
+                      </div>
+                    ))}
+                    {wEvents.map(ev => (
+                      <div key={ev.id} className="cal-chip event" style={{ marginBottom: 2 }}>
+                        📌 {truncate(ev.title, 10)}
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {shownEvents.map(ev => (
-                  <div key={ev.id} className="cal-chip event" title={ev.title}>
-                    📌 {truncate(ev.title, 11)}
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* ── Day View ── */}
+        {calView === "day" && (() => {
+          const dateStr = dateObjToStr(calDate);
+          const dPosts = getPostsByStr(dateStr).filter(p => activeCategories.size === 0 || activeCategories.has(p.status));
+          const dEvents = getEventsByStr(dateStr).filter(() => activeCategories.size === 0 || activeCategories.has("event"));
+          return (
+            <div style={{ minHeight: 200 }}>
+              {dPosts.length === 0 && dEvents.length === 0 && (
+                <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>Nothing scheduled for this day.</p>
+              )}
+              {dPosts.map(p => (
+                <div key={p.id} onClick={() => { setSelectedPost(p.id); setView("contentDetail"); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, cursor: "pointer", background: "#fafafa" }}
+                  onMouseOver={e => e.currentTarget.style.background = "var(--sprout-cream)"}
+                  onMouseOut={e => e.currentTarget.style.background = "#fafafa"}>
+                  <span className={`cal-chip ${p.status}`} style={{ margin: 0, flexShrink: 0 }}>{POST_STATUSES[p.status]?.icon} {POST_STATUSES[p.status]?.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || truncate(p.caption, 40) || "Untitled"}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>→</span>
+                </div>
+              ))}
+              {dEvents.map(ev => (
+                <div key={ev.id} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8, background: "#fafafa" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>📌 {ev.title}</div>
+                    {ev.notes && <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3 }}>{ev.notes}</div>}
                   </div>
-                ))}
-                {overflow > 0 && (
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>+{overflow} more</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  <button onClick={() => deleteEvent(ev)} style={{ background: "none", border: "none", cursor: "pointer", color: "#B91C1C", fontSize: 14, padding: "2px 6px", borderRadius: 4 }}>✕</button>
+                </div>
+              ))}
+              <button className="btn btn-outline btn-sm" style={{ width: "100%", justifyContent: "center", marginTop: 8 }}
+                onClick={() => { setSelectedDay({ dateStr, day: calDate.getDate() }); setAddingEvent(true); setNewEvent({ title: "", notes: "", recurrence: "none" }); }}>
+                + Add Event
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Toggleable filter legend */}
         <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
