@@ -715,9 +715,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   // ── Supabase CRUD ───────────────────────────────────────────────────────
   const addPost = async (post) => {
     const { data: { user } } = await supabase.auth.getUser();
+    const { id: _omit, ...rowData } = postToRow(post);
     const { data, error } = await supabase
       .from('social_posts')
-      .insert([{ ...postToRow(post), user_id: user.id }])
+      .insert([{ ...rowData, user_id: user.id }])
       .select().single();
     if (error) { showToast("Error creating post"); return null; }
     const newPost = rowToPost(data);
