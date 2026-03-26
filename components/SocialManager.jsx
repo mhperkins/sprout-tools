@@ -484,6 +484,7 @@ const POST_STATUSES = {
   ready:     { label: "Ready",     cls: "badge-approved",  icon: "✅" },
   scheduled: { label: "Scheduled", cls: "badge-pending",   icon: "⏰" },
   published: { label: "Published", cls: "badge-published", icon: "🟣" },
+  archived:  { label: "Archived",  cls: "tag-gray",        icon: "🗄️" },
 };
 
 const CONTENT_TYPES = [
@@ -745,6 +746,16 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
     if (!error) { setPosts(prev => prev.filter(p => p.id !== id)); showToast("Post deleted"); }
   };
 
+  const archivePost = async (id) => {
+    const { error } = await supabase.from('social_posts').update({ status: "archived" }).eq('id', id);
+    if (!error) { setPosts(prev => prev.map(p => p.id === id ? { ...p, status: "archived" } : p)); showToast("Post archived"); }
+  };
+
+  const restorePost = async (id, status = "draft") => {
+    const { error } = await supabase.from('social_posts').update({ status }).eq('id', id);
+    if (!error) { setPosts(prev => prev.map(p => p.id === id ? { ...p, status } : p)); showToast("Post restored"); }
+  };
+
   // ── Instagram publish ───────────────────────────────────────────────────
   const [publishingId, setPublishingId] = useState(null);
 
@@ -881,6 +892,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
       <span style={{ fontSize: 15 }}>🧭</span> <span className="nav-text">Strategies</span>
       {strategies.length > 0 && <span className="badge">{strategies.length}</span>}
     </div>
+    <div className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => setView("archive")} title="Archive">
+      <span style={{ fontSize: 15 }}>🗄️</span> <span className="nav-text">Archive</span>
+      {posts.filter(p => p.status === "archived").length > 0 && <span className="badge">{posts.filter(p => p.status === "archived").length}</span>}
+    </div>
   </div>
 
   <div className="sidebar-footer">
@@ -923,14 +938,14 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} />
           )}
           {view === "myContent" && (
-            <MyContentView posts={posts.filter(p => p.status !== "published")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} />
+            <MyContentView posts={posts.filter(p => p.status !== "published" && p.status !== "archived")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} archivePost={archivePost} />
           )}
           {view === "contentDetail" && (
             <ContentDetailView
               postId={selectedPost} posts={posts} updatePost={updatePost} deletePost={deletePost}
               showToast={showToast} onBack={(dest) => setView(dest || prevView)}
               onPublish={handlePublishToInstagram} publishingId={publishingId}
-              prevView={prevView}
+              prevView={prevView} archivePost={archivePost}
             />
           )}
           {view === "published" && (
@@ -950,6 +965,9 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
           )}
           {view === "strategies" && (
             <StrategiesView strategies={strategies} saveStrategies={saveStrategies} showToast={showToast} />
+          )}
+          {view === "archive" && (
+            <ArchiveView posts={posts.filter(p => p.status === "archived")} restorePost={restorePost} deletePost={deletePost} onOpen={(id) => { setPrevView("archive"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} />
           )}
         </main>
 
@@ -2687,7 +2705,7 @@ You have live web search. Use it proactively when asked about specific orgs, ben
 }
 
 // ─── My Content View ─────────────────────────────────────────────────────────
-function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreated }) {
+function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreated, archivePost }) {
   const [filter, setFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: "", contentType: "image", category: "community", status: "draft" });
@@ -2765,6 +2783,10 @@ if (newPost?.id && onCreated) setTimeout(() => onCreated(newPost.id), 0);
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
               {statusBadge(post.status)}
+              <button className="btn btn-secondary btn-sm" style={{ fontSize: 11, padding: "2px 8px" }}
+                onClick={(e) => { e.stopPropagation(); if (window.confirm("Archive this post?")) archivePost(post.id); }}>
+                🗄️ Archive
+              </button>
             </div>
           </div>
         );
@@ -3133,7 +3155,7 @@ function ContentNotesTab({ post, update, showToast }) {
 }
 
 // ─── Content Detail View ──────────────────────────────────────────────────────
-function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId, prevView }) {
+function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId, prevView, archivePost }) {
   const [tab, setTab] = useState("overview");
   const post = posts.find(p => p.id === postId);
   if (!post) return <div className="empty-state"><p>Content not found.</p></div>;
@@ -3182,7 +3204,8 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
                   {publishingId === post.id ? <><div className="spinner" /> Publishing…</> : <>📤 Publish to Instagram</>}
                 </button>
               )}
-              <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Delete this post?")) { deletePost(post.id); onBack(); } }}>🗑 Delete</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm("Archive this post?")) { archivePost(post.id); onBack(); } }}>🗄️ Archive</button>
+              <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Permanently delete this post? This cannot be undone.")) { deletePost(post.id); onBack(); } }}>🗑 Delete</button>
             </div>
           </div>
         </div>
@@ -3795,6 +3818,44 @@ function MediaView({ showToast, posts, updatePost }) {
     </div>
   );
 }
+function ArchiveView({ posts, restorePost, deletePost, onOpen, showToast }) {
+  return (
+    <div>
+      <div className="page-header">
+        <h2>🗄️ Archive</h2>
+        <p>{posts.length} archived post{posts.length !== 1 ? "s" : ""}.</p>
+      </div>
+      {posts.length === 0 ? (
+        <div className="empty-state"><div className="icon">🗄️</div><h3>Archive is empty</h3><p>Archived posts will appear here.</p></div>
+      ) : posts.map(post => {
+        const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+        const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
+        return (
+          <div key={post.id} className="post-card" onClick={() => onOpen(post.id)}>
+            <div className="post-thumb">
+              {thumb ? <img src={thumb} alt="" onError={e => e.target.style.display = "none"} /> : <span>{typeInfo.icon}</span>}
+            </div>
+            <div className="post-info">
+              <h4>{post.title || "Untitled"}</h4>
+              <div className="caption-preview">{post.caption || "No caption yet"}</div>
+              <div className="post-meta">
+                <span style={{ fontSize: 11, fontWeight: 700, background: "var(--sprout-warm)", color: "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10 }}>{typeInfo.icon} {typeInfo.label}</span>
+                <span className="tag tag-gray">{CATEGORIES.find(c => c.id === post.category)?.label || post.category}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+              <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }}
+                onClick={(e) => { e.stopPropagation(); restorePost(post.id); }}>↩️ Restore</button>
+              <button className="btn btn-danger btn-sm" style={{ fontSize: 11 }}
+                onClick={(e) => { e.stopPropagation(); if (window.confirm("Permanently delete this post? This cannot be undone.")) deletePost(post.id); }}>🗑 Delete</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StrategiesView({ strategies, saveStrategies, showToast }) {
   return (
     <div>
