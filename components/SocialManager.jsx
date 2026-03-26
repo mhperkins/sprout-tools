@@ -574,6 +574,7 @@ function rowToPost(row) {
     reach: row.reach || 0,
     hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
     notes: row.notes || "",
+    todos: row.todos || [],
     planId: row.plan_id || null,                 // links back to content plan
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),
@@ -599,6 +600,7 @@ function postToRow(post, userId) {
     reach: post.reach || 0,
     tags: post.hashtags || [...BRAND_VOICE.brandHashtags],
     notes: post.notes || "",
+    todos: post.todos || [],
     plan_id: post.planId || null,
     updated_at: new Date().toISOString(),
   };
@@ -618,6 +620,8 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [strategies, setStrategies] = useState([]);         // [{ id, title, body, createdAt }]
   const [calendarEvents, setCalendarEvents] = useState([]); // [{ id, title, date, type, notes }]
   const [notifications, setNotifications] = useState([]);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [archivedPlans, setArchivedPlans] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -643,6 +647,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         if (ce) setCalendarEvents(JSON.parse(ce));
         const no = localStorage.getItem("sm_notifications");
         if (no) setNotifications(JSON.parse(no));
+        const ch = localStorage.getItem("sm_chat_history");
+        if (ch) setChatHistory(JSON.parse(ch));
+        const ap = localStorage.getItem("sm_archived_plans");
+        if (ap) setArchivedPlans(JSON.parse(ap));
       } catch {}
 
       setLoading(false);
@@ -669,6 +677,17 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const saveNotifications = (updated) => {
     setNotifications(updated);
     try { localStorage.setItem("sm_notifications", JSON.stringify(updated)); } catch {}
+  };
+
+ const saveChatHistory = (updated) => {
+    const capped = updated.slice(0, 50);
+    setChatHistory(capped);
+    try { localStorage.setItem("sm_chat_history", JSON.stringify(capped)); } catch {}
+  };
+
+  const saveArchivedPlans = (updated) => {
+    setArchivedPlans(updated);
+    try { localStorage.setItem("sm_archived_plans", JSON.stringify(updated)); } catch {}
   };
 
   const addNotification = (notif) => {
@@ -733,12 +752,13 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
 
   const updatePost = async (id, changes) => {
     const existing = posts.find(p => p.id === id);
+    const merged = { ...existing, ...changes };
     const { data, error } = await supabase
       .from('social_posts')
-      .update(postToRow({ ...existing, ...changes }))
+      .update(postToRow(merged))
       .eq('id', id)
       .select().single();
-    if (!error && data) setPosts(prev => prev.map(p => p.id === id ? rowToPost(data) : p));
+    if (!error && data) setPosts(prev => prev.map(p => p.id === id ? { ...rowToPost(data), todos: merged.todos ?? existing?.todos ?? [] } : p));
   };
 
   const deletePost = async (id) => {
@@ -896,6 +916,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
       <span style={{ fontSize: 15 }}>🗄️</span> <span className="nav-text">Archive</span>
       {posts.filter(p => p.status === "archived").length > 0 && <span className="badge">{posts.filter(p => p.status === "archived").length}</span>}
     </div>
+    <div className={`nav-item ${view === "chatHistory" ? "active" : ""}`} onClick={() => setView("chatHistory")} title="Chat History">
+      <span style={{ fontSize: 15 }}>💬</span> <span className="nav-text">Chat History</span>
+      {chatHistory.length > 0 && <span className="badge">{chatHistory.length}</span>}
+    </div>
   </div>
 
   <div className="sidebar-footer">
@@ -935,21 +959,21 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} calView={calView} setCalView={setCalView} setPrevView={setPrevView} calDate={calDate} setCalDate={setCalDate} />
           )}
           {view === "plans" && (
-            <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} />
+            <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} chatHistory={chatHistory} saveChatHistory={saveChatHistory} archivedPlans={archivedPlans} saveArchivedPlans={saveArchivedPlans} />
           )}
           {view === "myContent" && (
-            <MyContentView posts={posts.filter(p => p.status !== "published" && p.status !== "archived")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} archivePost={archivePost} />
+            <MyContentView posts={posts.filter(p => p.status !== "published" && p.status !== "archived")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} archivePost={archivePost} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setViewMain={setView} setSelectedPostMain={setSelectedPost} setPrevViewMain={setPrevView} />
           )}
           {view === "contentDetail" && (
             <ContentDetailView
               postId={selectedPost} posts={posts} updatePost={updatePost} deletePost={deletePost}
               showToast={showToast} onBack={(dest) => setView(dest || prevView)}
               onPublish={handlePublishToInstagram} publishingId={publishingId}
-              prevView={prevView} archivePost={archivePost}
+              prevView={prevView} archivePost={archivePost} calendarEvents={calendarEvents}
             />
           )}
           {view === "published" && (
-            <PublishedView posts={posts.filter(p => p.status === "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} />
+            <PublishedView posts={posts.filter(p => p.status === "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} addPost={addPost} showToast={showToast} />
           )}
           {view === "analytics" && (
             <AnalyticsView posts={posts} />
@@ -967,7 +991,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <StrategiesView strategies={strategies} saveStrategies={saveStrategies} showToast={showToast} />
           )}
           {view === "archive" && (
-            <ArchiveView posts={posts.filter(p => p.status === "archived")} restorePost={restorePost} deletePost={deletePost} onOpen={(id) => { setPrevView("archive"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} />
+            <ArchiveView posts={posts.filter(p => p.status === "archived")} restorePost={restorePost} deletePost={deletePost} onOpen={(id) => { setPrevView("archive"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} archivedPlans={archivedPlans} saveArchivedPlans={saveArchivedPlans} saveContentPlans={saveContentPlans} contentPlans={contentPlans} />
+          )}
+          {view === "chatHistory" && (
+            <ChatHistoryView chatHistory={chatHistory} saveChatHistory={saveChatHistory} />
           )}
         </main>
 
@@ -2705,8 +2732,10 @@ You have live web search. Use it proactively when asked about specific orgs, ben
 }
 
 // ─── My Content View ─────────────────────────────────────────────────────────
-function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreated, archivePost }) {
+function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreated, archivePost, calendarEvents, saveCalendarEvents, setViewMain, setSelectedPostMain, setPrevViewMain }) {
   const [filter, setFilter] = useState("all");
+  const [viewMode, setViewMode] = useState("list");
+  const [localCalDate, setLocalCalDate] = useState(new Date());
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: "", contentType: "image", category: "community", status: "draft" });
   const filtered = filter === "all" ? posts : posts.filter(p => p.status === filter);
@@ -2737,7 +2766,19 @@ if (newPost?.id && onCreated) setTimeout(() => onCreated(newPost.id), 0);
             <h2>📋 My Content</h2>
             <p>Track and manage all content in your pipeline.</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>＋ New Post</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1.5px solid var(--border)" }}>
+              <button onClick={() => setViewMode("list")}
+                style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", background: viewMode === "list" ? "var(--sprout-green)" : "#fff", color: viewMode === "list" ? "#fff" : "var(--text-secondary)", fontFamily: "DM Sans, sans-serif", transition: "all 0.15s" }}>
+                ☰ List
+              </button>
+              <button onClick={() => setViewMode("calendar")}
+                style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", background: viewMode === "calendar" ? "var(--sprout-green)" : "#fff", color: viewMode === "calendar" ? "#fff" : "var(--text-secondary)", fontFamily: "DM Sans, sans-serif", transition: "all 0.15s" }}>
+                📅 Calendar
+              </button>
+            </div>
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>＋ New Post</button>
+          </div>
         </div>
       </div>
 
@@ -2753,44 +2794,97 @@ if (newPost?.id && onCreated) setTimeout(() => onCreated(newPost.id), 0);
         ))}
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="icon">🌱</div>
-          <h3>{posts.length === 0 ? "No content yet" : "None in this status"}</h3>
-          <p>{posts.length === 0 ? "Create a post or start a content plan." : "Try a different filter."}</p>
-        </div>
-      ) : filtered.map(post => {
-        const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
-        const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
+      {/* ── Calendar Sub-View ── */}
+      {viewMode === "calendar" && (() => {
+        const year = localCalDate.getFullYear();
+        const month = localCalDate.getMonth();
+        const today = new Date();
+        const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+        const days = getMonthDays(year, month);
+        const dateObjToStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        const getPostsForStr = (str) => filtered.filter(p => {
+          const d = p.scheduledAt || p.createdAt;
+          return d && d.startsWith(str);
+        });
         return (
-          <div key={post.id} className="post-card" onClick={() => onOpen(post.id)}>
-            <div className="post-thumb">
-              {thumb ? <img src={thumb} alt="" onError={e => e.target.style.display = "none"} /> : <span>{typeInfo.icon}</span>}
+          <div className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setLocalCalDate(new Date(year, month - 1))}>← Prev</button>
+              <h3 style={{ fontFamily: "Lora, serif", fontSize: 18, color: "var(--sprout-green)" }}>{monthNames[month]} {year}</h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setLocalCalDate(new Date(year, month + 1))}>Next →</button>
             </div>
-            <div className="post-info">
-              <h4>{post.title || "Untitled"}</h4>
-              <div className="caption-preview">{post.caption || "No caption yet"}</div>
-              <div className="post-meta">
-                <span style={{ fontSize: 11, fontWeight: 700, background: "var(--sprout-warm)", color: "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10 }}>
-                  {typeInfo.icon} {typeInfo.label}
-                </span>
-                {post.contentType === "carousel" && (post.mediaItems?.length > 0) && (
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{post.mediaItems.length} slides</span>
-                )}
-                <span className="tag tag-gray">{CATEGORIES.find(c => c.id === post.category)?.label || post.category}</span>
-                {post.scheduledAt && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>📅 {formatDate(post.scheduledAt)}</span>}
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-              {statusBadge(post.status)}
-              <button className="btn btn-secondary btn-sm" style={{ fontSize: 11, padding: "2px 8px" }}
-                onClick={(e) => { e.stopPropagation(); if (window.confirm("Archive this post?")) archivePost(post.id); }}>
-                🗄️ Archive
-              </button>
+            <div className="cal-grid">
+              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
+                <div key={d} className="cal-day-hdr">{d}</div>
+              ))}
+              {days.map((d, i) => {
+                const dateStr = d.other
+                  ? dateObjToStr(new Date(d.month < 0 ? year - 1 : d.month > 11 ? year + 1 : year, (d.month + 12) % 12, d.day))
+                  : `${year}-${String(month+1).padStart(2,"0")}-${String(d.day).padStart(2,"0")}`;
+                const dayPosts = getPostsForStr(dateStr);
+                const isToday = !d.other && d.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                return (
+                  <div key={i} className={`cal-cell ${d.other ? "other" : ""} ${isToday ? "today" : ""}`}>
+                    <div className={`cal-date-num ${isToday ? "today" : ""}`}>{d.day}</div>
+                    {dayPosts.slice(0, 3).map(p => (
+                      <div key={p.id} className={`cal-chip ${p.status}`}
+                        onClick={() => { setPrevViewMain("myContent"); setSelectedPostMain(p.id); setViewMain("contentDetail"); }}
+                        title={p.title || p.caption?.slice(0, 40)}>
+                        {truncate(p.title || p.caption, 14)}
+                      </div>
+                    ))}
+                    {dayPosts.length > 3 && <div style={{ fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>+{dayPosts.length - 3} more</div>}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
-      })}
+      })()}
+
+      {/* ── List Sub-View ── */}
+      {viewMode === "list" && (
+        <>
+          {filtered.length === 0 ? (
+            <div className="empty-state">
+              <div className="icon">🌱</div>
+              <h3>{posts.length === 0 ? "No content yet" : "None in this status"}</h3>
+              <p>{posts.length === 0 ? "Create a post or start a content plan." : "Try a different filter."}</p>
+            </div>
+          ) : filtered.map(post => {
+            const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
+            const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
+            return (
+              <div key={post.id} className="post-card" onClick={() => onOpen(post.id)}>
+                <div className="post-thumb">
+                  {thumb ? <img src={thumb} alt="" onError={e => e.target.style.display = "none"} /> : <span>{typeInfo.icon}</span>}
+                </div>
+                <div className="post-info">
+                  <h4>{post.title || "Untitled"}</h4>
+                  <div className="caption-preview">{post.caption || "No caption yet"}</div>
+                  <div className="post-meta">
+                    <span style={{ fontSize: 11, fontWeight: 700, background: "var(--sprout-warm)", color: "var(--sprout-bark)", padding: "2px 8px", borderRadius: 10 }}>
+                      {typeInfo.icon} {typeInfo.label}
+                    </span>
+                    {post.contentType === "carousel" && (post.mediaItems?.length > 0) && (
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{post.mediaItems.length} slides</span>
+                    )}
+                    <span className="tag tag-gray">{CATEGORIES.find(c => c.id === post.category)?.label || post.category}</span>
+                    {post.scheduledAt && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>📅 {formatDate(post.scheduledAt)}</span>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                  {statusBadge(post.status)}
+                  <button className="btn btn-secondary btn-sm" style={{ fontSize: 11, padding: "2px 8px" }}
+                    onClick={(e) => { e.stopPropagation(); if (window.confirm("Archive this post?")) archivePost(post.id); }}>
+                    🗄️ Archive
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     {showCreate && (
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal-card" style={{ width: 480 }} onClick={e => e.stopPropagation()}>
@@ -2941,16 +3035,23 @@ function ContentOverviewTab({ post, update, showToast }) {
   );
 }
 
-function ContentTasksTab({ post, update, showToast }) {
+function ContentTasksTab({ post, update, showToast, calendarEvents }) {
   const [newTask, setNewTask] = useState("");
   const [newPriority, setNewPriority] = useState("med");
+  const [miniCalDate, setMiniCalDate] = useState(() => {
+    if (post.scheduledAt) return new Date(post.scheduledAt);
+    return new Date();
+  });
   const todos = post.todos || [];
-  const DEFAULT_TASKS = [
-    { id: `dt_${Date.now()}_1`, text: "Write caption", priority: "high", done: false },
-    { id: `dt_${Date.now()}_2`, text: "Prepare media assets", priority: "high", done: false },
-    { id: `dt_${Date.now()}_3`, text: "Review hashtags", priority: "med", done: false },
-    { id: `dt_${Date.now()}_4`, text: "Final review before publish", priority: "med", done: false },
-  ];
+  const makeDefaultTasks = () => {
+    const t = Date.now();
+    return [
+      { id: `dt_${t}_1`, text: "Write caption", priority: "high", done: false },
+      { id: `dt_${t + 1}_2`, text: "Prepare media assets", priority: "high", done: false },
+      { id: `dt_${t + 2}_3`, text: "Review hashtags", priority: "med", done: false },
+      { id: `dt_${t + 3}_4`, text: "Final review before publish", priority: "med", done: false },
+    ];
+  };
   const addTask = () => {
     if (!newTask.trim()) return;
     update({ todos: [...todos, { id: `t_${Date.now()}`, text: newTask, priority: newPriority, done: false }] });
@@ -2959,38 +3060,110 @@ function ContentTasksTab({ post, update, showToast }) {
   const toggleTask = (id) => update({ todos: todos.map(t => t.id === id ? { ...t, done: !t.done } : t) });
   const deleteTask = (id) => update({ todos: todos.filter(t => t.id !== id) });
 
+  // Mini calendar locals — never touch lifted calDate/calView
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const year = miniCalDate.getFullYear();
+  const month = miniCalDate.getMonth();
+  const today = new Date();
+  const days = getMonthDays(year, month);
+  const scheduledStr = post.scheduledAt ? post.scheduledAt.slice(0, 10) : null;
+  const getDateStr = (d) => {
+    const y = d.month < 0 ? year - 1 : d.month > 11 ? year + 1 : year;
+    const m = ((d.month % 12) + 12) % 12;
+    return `${y}-${String(m + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  };
+  const eventsOnDay = (str) => (calendarEvents || []).filter(e => e.date === str);
+
   return (
-    <div className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>Tasks</h3>
-        {todos.length === 0 && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { update({ todos: DEFAULT_TASKS }); showToast("Default tasks added"); }}>
-            ✨ Add Default Tasks
-          </button>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16, alignItems: "start" }}>
+      {/* ── Tasks list ── */}
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
+          <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>Tasks</h3>
+          {todos.length === 0 && (
+           <button className="btn btn-secondary btn-sm" onClick={() => { update({ todos: makeDefaultTasks() }); showToast("Default tasks added"); }}>
+              ✨ Add Default Tasks
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          <input className="form-input" style={{ flex: 1 }} placeholder="Add a task..." value={newTask}
+            onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()} />
+          <select className="form-select" style={{ width: 110 }} value={newPriority} onChange={e => setNewPriority(e.target.value)}>
+            <option value="high">🔴 High</option>
+            <option value="med">🟡 Med</option>
+            <option value="low">🟢 Low</option>
+          </select>
+          <button className="btn btn-primary" onClick={addTask}>Add</button>
+        </div>
+        {todos.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No tasks yet.</div>
+        ) : todos.map(t => (
+          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+            <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+            <span style={{ flex: 1, textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text-muted)" : "var(--text-primary)", fontSize: 14 }}>{t.text}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: t.priority === "high" ? "var(--sprout-coral)" : t.priority === "med" ? "var(--sprout-gold)" : "var(--sprout-sage)" }}>
+              {t.priority?.toUpperCase()}
+            </span>
+            <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 14 }} onClick={() => deleteTask(t.id)}>🗑</button>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Mini calendar (local state only) ── */}
+      <div className="card" style={{ padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <button onClick={() => setMiniCalDate(new Date(year, month - 1))}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-secondary)", fontSize: 14, padding: "2px 6px", borderRadius: 4 }}>‹</button>
+          <span style={{ fontFamily: "Lora, serif", fontSize: 13, fontWeight: 700, color: "var(--sprout-green)" }}>{monthNames[month]} {year}</span>
+          <button onClick={() => setMiniCalDate(new Date(year, month + 1))}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-secondary)", fontSize: 14, padding: "2px 6px", borderRadius: 4 }}>›</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1 }}>
+          {["S","M","T","W","T","F","S"].map((d, i) => (
+            <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, color: "var(--text-muted)", padding: "3px 0", textTransform: "uppercase" }}>{d}</div>
+          ))}
+          {days.map((d, i) => {
+            const str = getDateStr(d);
+            const isScheduled = !d.other && str === scheduledStr;
+            const isToday = !d.other && d.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+            const hasEvents = eventsOnDay(str).length > 0;
+            return (
+              <div key={i} style={{
+                textAlign: "center", fontSize: 11, padding: "4px 2px", borderRadius: 4,
+                background: isScheduled ? "var(--sprout-green)" : isToday ? "rgba(122,158,91,0.15)" : "transparent",
+                color: isScheduled ? "#fff" : d.other ? "var(--text-muted)" : "var(--text-primary)",
+                fontWeight: isScheduled || isToday ? 700 : 400,
+                position: "relative",
+              }}>
+                {d.day}
+                {hasEvents && !d.other && (
+                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--sprout-coral)", margin: "1px auto 0", position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)" }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {scheduledStr && (
+          <div style={{ marginTop: 12, padding: "8px 10px", background: "var(--sprout-cream)", borderRadius: 8, fontSize: 12 }}>
+            <div style={{ fontWeight: 700, color: "var(--sprout-green)", marginBottom: 2 }}>📅 Scheduled</div>
+            <div style={{ color: "var(--text-secondary)" }}>{formatDate(post.scheduledAt)}</div>
+          </div>
+        )}
+        {eventsOnDay(scheduledStr || "").length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Events that day</div>
+            {eventsOnDay(scheduledStr).map(ev => (
+              <div key={ev.id} style={{ fontSize: 12, color: "var(--text-secondary)", padding: "4px 0", borderTop: "1px solid var(--border)" }}>
+                📌 {ev.title}
+              </div>
+            ))}
+          </div>
+        )}
+        {!scheduledStr && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>No scheduled date set</div>
         )}
       </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <input className="form-input" style={{ flex: 1 }} placeholder="Add a task..." value={newTask}
-          onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()} />
-        <select className="form-select" style={{ width: 110 }} value={newPriority} onChange={e => setNewPriority(e.target.value)}>
-          <option value="high">🔴 High</option>
-          <option value="med">🟡 Med</option>
-          <option value="low">🟢 Low</option>
-        </select>
-        <button className="btn btn-primary" onClick={addTask}>Add</button>
-      </div>
-      {todos.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No tasks yet.</div>
-      ) : todos.map(t => (
-        <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-          <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} style={{ width: 16, height: 16, cursor: "pointer" }} />
-          <span style={{ flex: 1, textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text-muted)" : "var(--text-primary)", fontSize: 14 }}>{t.text}</span>
-          <span style={{ fontSize: 11, fontWeight: 600, color: t.priority === "high" ? "var(--sprout-coral)" : t.priority === "med" ? "var(--sprout-gold)" : "var(--sprout-sage)" }}>
-            {t.priority?.toUpperCase()}
-          </span>
-          <button style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 14 }} onClick={() => deleteTask(t.id)}>🗑</button>
-        </div>
-      ))}
     </div>
   );
 }
@@ -3002,11 +3175,39 @@ function CaptionMediaTab({ post, update, showToast }) {
   const [newMediaUrl, setNewMediaUrl] = useState("");
   const [newMediaType, setNewMediaType] = useState("image");
   const [showLibrary, setShowLibrary] = useState(false);
+  const [captionGenerating, setCaptionGenerating] = useState(false);
   const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
   const maxMedia = typeInfo.maxMedia || 1;
   const mediaItems = post.mediaItems || [];
 
   const saveCaption = () => { update({ caption, hashtags }); showToast("Caption saved"); };
+
+  const generateCaption = async () => {
+    setCaptionGenerating(true);
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514", max_tokens: 1000,
+          system: `You are a social media copywriter for Sprout Society, a mental wellness nonprofit. Brand voice: ${BRAND_VOICE.tone} ${BRAND_VOICE.sentenceStyle} ${BRAND_VOICE.vocabulary} Emojis: ${BRAND_VOICE.emojis} CTA: ${BRAND_VOICE.cta} Never say: ${BRAND_VOICE.weNeverSay.join(", ")}. Respond ONLY with a raw JSON object — no markdown fences, no explanation: {"caption": "...", "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"]}`,
+          messages: [{ role: "user", content: `Write an Instagram caption for this post. Title: "${post.title || "Untitled"}". Type: ${post.contentType || "image"}. Category: ${post.category || "community"}.${caption ? ` Existing draft: "${caption}"` : ""}` }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.content?.filter(i => i.type === "text").map(i => i.text).join("") || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      const newCaption = parsed.caption || caption;
+      const newHashtags = parsed.hashtags?.length ? parsed.hashtags : hashtags;
+      if (parsed.caption) setCaption(newCaption);
+      if (parsed.hashtags?.length) setHashtags(newHashtags);
+      update({ caption: newCaption, hashtags: newHashtags });
+      showToast("Caption generated & saved ✨");
+    } catch {
+      showToast("Caption generation failed");
+    }
+    setCaptionGenerating(false);
+  };
 
   const addMedia = () => {
     if (!newMediaUrl.trim()) return;
@@ -3036,7 +3237,12 @@ function CaptionMediaTab({ post, update, showToast }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="card" style={{ marginBottom: 0 }}>
-        <h3 className="section-title" style={{ marginBottom: 12, borderBottom: "none", paddingBottom: 0 }}>Caption</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 className="section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>Caption</h3>
+          <button className="btn btn-secondary btn-sm" onClick={generateCaption} disabled={captionGenerating}>
+            {captionGenerating ? <><div className="spinner" style={{ borderTopColor: "var(--sprout-bark)", borderColor: "rgba(0,0,0,0.1)" }} /> Generating…</> : "✨ Generate Caption"}
+          </button>
+        </div>
         <textarea className="form-textarea" style={{ minHeight: 120, marginBottom: 10 }} value={caption}
           onChange={e => setCaption(e.target.value)} placeholder="Write your caption here..." />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -3155,7 +3361,7 @@ function ContentNotesTab({ post, update, showToast }) {
 }
 
 // ─── Content Detail View ──────────────────────────────────────────────────────
-function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId, prevView, archivePost }) {
+function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, onBack, onPublish, publishingId, prevView, archivePost, calendarEvents }) {
   const [tab, setTab] = useState("overview");
   const post = posts.find(p => p.id === postId);
   if (!post) return <div className="empty-state"><p>Content not found.</p></div>;
@@ -3165,13 +3371,16 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
   const doneTasks = (post.todos || []).filter(t => t.done).length;
   const totalTasks = (post.todos || []).length;
 
+  const backLabel = prevView === "calendar" ? "← Back to Calendar"
+    : prevView === "archive"   ? "← Back to Archive"
+    : "← Back to My Content";
+
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-  <button className="btn btn-secondary btn-sm" onClick={() => onBack("calendar")}>← Back to Calendar</button>
-  <button className="btn btn-secondary btn-sm" onClick={() => onBack("myContent")}>← Back to My Content</button>
-</div>
+          <button className="btn btn-secondary btn-sm" onClick={() => onBack(prevView || "myContent")}>{backLabel}</button>
+        </div>
 
         <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid var(--border)", boxShadow: "var(--shadow)", marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14 }}>
@@ -3223,7 +3432,7 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
       </div>
 
       {tab === "overview"     && <ContentOverviewTab post={post} update={update} showToast={showToast} />}
-      {tab === "tasks"        && <ContentTasksTab post={post} update={update} showToast={showToast} />}
+      {tab === "tasks"        && <ContentTasksTab post={post} update={update} showToast={showToast} calendarEvents={calendarEvents || []} />}
       {tab === "captionMedia" && <CaptionMediaTab post={post} update={update} showToast={showToast} />}
       {tab === "notes"        && <ContentNotesTab post={post} update={update} showToast={showToast} />}
     </div>
@@ -3231,13 +3440,27 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
 }
 
 // ─── Plans View ───────────────────────────────────────────────────────────────
-function PlansView({ contentPlans, saveContentPlans, posts, addPost, showToast, communityOrgs, calendarEvents, saveCommunityOrgs, saveStrategies, strategies }) {
+const COACH_INITIAL_MSG = { role: "assistant", content: "Hi! I'm your content planning coach. Tell me your goals and I'll create a detailed content plan. 🗺️\n\nI can:\n• Build a multi-week content plan\n• Create an event or campaign plan\n• Develop an overall strategy\n• Find partner orgs to collaborate with\n\nWhenever I produce something worth saving, I'll ask you before adding it anywhere." };
+
+function PlansView({ contentPlans, saveContentPlans, posts, addPost, showToast, communityOrgs, calendarEvents, saveCommunityOrgs, saveStrategies, strategies, chatHistory, saveChatHistory, archivedPlans, saveArchivedPlans }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [messages, setMessages] = useState([{ role: "assistant", content: "Hi! I'm your content planning coach. Tell me your goals and I'll create a detailed content plan. 🗺️\n\nI can:\n• Build a multi-week content plan\n• Create an event or campaign plan\n• Develop an overall strategy\n• Find partner orgs to collaborate with\n\nWhenever I produce something worth saving, I'll ask you before adding it anywhere." }]);
+  const [plansTab, setPlansTab] = useState("coach");
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sm_plans_coach_messages");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [COACH_INITIAL_MSG];
+  });
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const endDiv = useRef(null);
   useEffect(() => { endDiv.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, typing]);
+
+  const persistMessages = (msgs) => {
+    setMessages(msgs);
+    try { localStorage.setItem("sm_plans_coach_messages", JSON.stringify(msgs)); } catch {}
+  };
 
   const buildContext = () => {
     const pipeline = posts.filter(p => p.status !== "published").map(p => `${p.title} (${p.status})`).join(", ") || "none";
@@ -3277,7 +3500,7 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
     if (!userText || typing) return;
     setInput("");
     const newMessages = [...messages, { role: "user", content: userText }];
-    setMessages(newMessages);
+    persistMessages(newMessages);
     setTyping(true);
     try {
       const res = await fetch("/api/ai", {
@@ -3296,15 +3519,15 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
       if (actionMatch) {
         try {
           const action = JSON.parse(actionMatch[1]);
-          setMessages(prev => [...prev, { role: "assistant", content: displayText, action, resolved: false }]);
+           persistMessages([...newMessages, { role: "assistant", content: displayText, action, resolved: false }]);
         } catch {
-          setMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+          persistMessages([...newMessages, { role: "assistant", content: fullText }]);
         }
       } else {
-        setMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+        persistMessages([...newMessages, { role: "assistant", content: fullText }]);
       }
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", content: "Something went wrong. Please check your connection." }]);
+      persistMessages([...newMessages, { role: "assistant", content: "Something went wrong. Please check your connection." }]);
     }
     setTyping(false);
   };
@@ -3327,7 +3550,7 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
         showToast(`${newOrgs.length} org${newOrgs.length !== 1 ? "s" : ""} added to Community!`);
       }
     }
-    setMessages(prev => prev.map((m, i) => i === msgIdx ? { ...m, resolved: true, resolvedChoice: choice } : m));
+     persistMessages(messages.map((m, i) => i === msgIdx ? { ...m, resolved: true, resolvedChoice: choice } : m));
   };
 
   const addCardToContent = async (card) => {
@@ -3364,138 +3587,200 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
   ];
 
   return (
-    <div style={{ display: "flex", gap: 20, height: "calc(100vh - 48px)", overflow: "hidden" }}>
+    <div>
+      <div className="page-header">
+        <h2>🗺️ Plans</h2>
+        <p>Build content plans with the AI coach, or browse your saved plans.</p>
+      </div>
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        <div className={`tab ${plansTab === "coach" ? "active" : ""}`} onClick={() => setPlansTab("coach")}>🗺️ Coach</div>
+        <div className={`tab ${plansTab === "savedPlans" ? "active" : ""}`} onClick={() => setPlansTab("savedPlans")}>📋 Saved Plans ({contentPlans.length})</div>
+      </div>
 
-      {/* ── Left: Saved Plans ── */}
-      <div style={{ width: 260, minWidth: 260, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-        <div className="card" style={{ padding: 16, marginBottom: 0 }}>
-          <div className="section-title" style={{ marginBottom: 12 }}>🗺️ Saved Plans ({contentPlans.length})</div>
-          {contentPlans.length === 0 ? (
-            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>No plans yet. Chat with the AI to create one.</p>
-          ) : contentPlans.map(plan => (
-            <div key={plan.id}
-              style={{ padding: "10px 12px", borderRadius: 10, cursor: "pointer", marginBottom: 8, transition: "all 0.15s", background: selectedPlan?.id === plan.id ? "var(--sprout-sage)" : "var(--sprout-cream)", color: selectedPlan?.id === plan.id ? "#fff" : "var(--text-primary)", border: `1px solid ${selectedPlan?.id === plan.id ? "var(--sprout-sage)" : "var(--border)"}` }}
-              onClick={() => setSelectedPlan(selectedPlan?.id === plan.id ? null : plan)}>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{plan.title}</div>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{plan.cards.length} posts · {new Date(plan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+      {/* ── Coach Tab ── */}
+      {plansTab === "coach" && (
+        <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 220px)", background: "#fff", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, background: "var(--sprout-green)", flexShrink: 0 }}>
+            <div style={{ fontSize: 22 }}>🗺️</div>
+            <div>
+              <div style={{ fontFamily: "Lora, serif", fontWeight: 700, fontSize: 16, color: "var(--sprout-lime)" }}>Content Planning Coach</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Sprout Society · AI-Powered</div>
             </div>
-          ))}
-        </div>
+            <button onClick={() => {
+                if (messages.length > 1 && saveChatHistory) {
+                  const thread = { id: `chat_${Date.now()}`, title: messages.find(m => m.role === "user")?.content?.slice(0, 60) || "Untitled session", messages, savedAt: new Date().toISOString(), source: "Plans Coach" };
+                  saveChatHistory([thread, ...(chatHistory || [])]);
+                }
+                persistMessages([{ role: "assistant", content: "Cleared! What would you like to plan? 🗺️" }]);
+              }}
+              style={{ marginLeft: "auto", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
+              Clear
+            </button>
+          </div>
 
-        {selectedPlan && (
-          <div className="card" style={{ padding: 16, marginBottom: 0, flex: 1, overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ fontFamily: "Lora, serif", fontSize: 15, fontWeight: 700, color: "var(--sprout-green)" }}>{selectedPlan.title}</div>
-              <button className="btn btn-primary btn-sm" onClick={() => addAllCards(selectedPlan)}>Add All</button>
-            </div>
-            {selectedPlan.cards.map((card, i) => {
-              const ti = CONTENT_TYPES.find(t => t.id === card.contentType) || CONTENT_TYPES[0];
-              return (
-                <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{card.title}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{ti.icon} {ti.label} · {card.suggestedDate || "No date"}</div>
-                      <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{card.captionBrief}</div>
-                    </div>
-                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8, flexShrink: 0 }}
-                      onClick={() => addCardToContent(card).then(() => showToast("Added to My Content!"))}>＋</button>
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            {messages.map((m, i) => (
+              <div key={i}>
+                <div style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, background: m.role === "assistant" ? "var(--sprout-sage)" : "var(--sprout-sky)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>
+                    {m.role === "assistant" ? "🗺️" : "👤"}
+                  </div>
+                  <div style={{ maxWidth: "76%", padding: "10px 15px", lineHeight: 1.75, fontSize: 14, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", background: m.role === "user" ? "var(--sprout-green)" : "var(--sprout-cream)", color: m.role === "user" ? "#fff" : "var(--text-primary)" }}>
+                    {renderContent(m.content)}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── Right: AI Chat ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", minWidth: 0 }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, background: "var(--sprout-green)", flexShrink: 0 }}>
-          <div style={{ fontSize: 22 }}>🗺️</div>
-          <div>
-            <div style={{ fontFamily: "Lora, serif", fontWeight: 700, fontSize: 16, color: "var(--sprout-lime)" }}>Content Planning Coach</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Sprout Society · AI-Powered</div>
-          </div>
-          <button onClick={() => setMessages([{ role: "assistant", content: "Cleared! What would you like to plan? 🗺️" }])}
-            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>
-            Clear
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {messages.map((m, i) => (
-            <div key={i}>
-              <div style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
-                <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, background: m.role === "assistant" ? "var(--sprout-sage)" : "var(--sprout-sky)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>
-                  {m.role === "assistant" ? "🗺️" : "👤"}
-                </div>
-                <div style={{ maxWidth: "76%", padding: "10px 15px", lineHeight: 1.75, fontSize: 14, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", background: m.role === "user" ? "var(--sprout-green)" : "var(--sprout-cream)", color: m.role === "user" ? "#fff" : "var(--text-primary)" }}>
-                  {renderContent(m.content)}
+                {m.action && !m.resolved && (
+                  <div style={{ marginLeft: 40, marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {m.action.type === "propose_plan" && <>
+                      <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "plan")}>＋ Add to Plans</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                    </>}
+                    {m.action.type === "propose_strategy" && <>
+                      <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "strategy")}>🧭 Save as Strategy</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                    </>}
+                    {m.action.type === "propose_community" && <>
+                      <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "community")}>🤝 Add to Community</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
+                    </>}
+                  </div>
+                )}
+                {m.resolved && (
+                  <div style={{ marginLeft: 40, marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    {m.resolvedChoice !== "skip" ? "✓ Saved" : "✕ Skipped"}
+                  </div>
+                )}
+              </div>
+            ))}
+            {typing && (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--sprout-sage)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🗺️</div>
+                <div style={{ padding: "10px 15px", borderRadius: "4px 12px 12px 12px", background: "var(--sprout-cream)" }}>
+                  <div className="chat-typing"><span /><span /><span /></div>
                 </div>
               </div>
-              {m.action && !m.resolved && (
-                <div style={{ marginLeft: 40, marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {m.action.type === "propose_plan" && <>
-                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "plan")}>＋ Add to Plans</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
-                  </>}
-                  {m.action.type === "propose_strategy" && <>
-                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "strategy")}>🧭 Save as Strategy</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
-                  </>}
-                  {m.action.type === "propose_community" && <>
-                    <button className="btn btn-primary btn-sm" onClick={() => commitAction(i, m.action, "community")}>🤝 Add to Community</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => commitAction(i, m.action, "skip")}>Skip</button>
-                  </>}
+            )}
+            <div ref={endDiv} />
+          </div>
+
+          {messages.length <= 1 && (
+            <div className="chat-suggestions-scroll">
+              {PLAN_SUGGESTIONS.map((s, i) => (
+                <button key={i} className="chat-suggestion-chip" onClick={() => sendMessage(s.prompt)}>{s.icon} {s.label}</button>
+              ))}
+            </div>
+          )}
+
+          <div className="chat-input-row">
+            <textarea className="chat-input" placeholder="Describe your goals, ask for a plan, or request partner research…" value={input}
+              onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} rows={1} />
+            <button className="chat-send" onClick={() => sendMessage()} disabled={!input.trim() || typing}>➤</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Saved Plans Tab ── */}
+      {plansTab === "savedPlans" && (
+        <div>
+          {contentPlans.length === 0 ? (
+            <div className="empty-state">
+              <div className="icon">🗺️</div>
+              <h3>No saved plans yet</h3>
+              <p>Ask the AI coach to create a content plan and save it here.</p>
+              <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setPlansTab("coach")}>Open Coach →</button>
+            </div>
+          ) : contentPlans.map(plan => (
+            <div key={plan.id} className="card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: selectedPlan?.id === plan.id ? 16 : 0 }}>
+                <div style={{ cursor: "pointer", flex: 1, minWidth: 0 }} onClick={() => setSelectedPlan(selectedPlan?.id === plan.id ? null : plan)}>
+                  <div style={{ fontFamily: "Lora, serif", fontSize: 16, fontWeight: 700, color: "var(--sprout-green)" }}>{plan.title}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{plan.cards.length} posts · Created {new Date(plan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
                 </div>
-              )}
-              {m.resolved && (
-                <div style={{ marginLeft: 40, marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-                  {m.resolvedChoice !== "skip" ? "✓ Saved" : "✕ Skipped"}
+                <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 12 }}>
+                  <button className="btn btn-primary btn-sm" onClick={() => addAllCards(plan).then(() => showToast(`${plan.cards.length} posts added!`))}>Add All</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setSelectedPlan(selectedPlan?.id === plan.id ? null : plan)}>{selectedPlan?.id === plan.id ? "▲ Hide" : "▼ Show"}</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { const updated = contentPlans.filter(p => p.id !== plan.id); saveContentPlans(updated); saveArchivedPlans([{ ...plan, archivedAt: new Date().toISOString() }, ...(archivedPlans || [])]); if (selectedPlan?.id === plan.id) setSelectedPlan(null); showToast("Plan archived"); }}>🗄️ Archive</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Delete this plan?")) { saveContentPlans(contentPlans.filter(p => p.id !== plan.id)); if (selectedPlan?.id === plan.id) setSelectedPlan(null); showToast("Plan deleted"); } }}>🗑</button>
+                </div>
+              </div>
+              {selectedPlan?.id === plan.id && (
+                <div>
+                  {plan.cards.map((card, i) => {
+                    const ti = CONTENT_TYPES.find(t => t.id === card.contentType) || CONTENT_TYPES[0];
+                    return (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 0", borderTop: "1px solid var(--border)" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{card.title}</div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{ti.icon} {ti.label} · {card.suggestedDate || "No date"} · {CATEGORIES.find(c => c.id === card.category)?.label || card.category}</div>
+                          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{card.captionBrief}</div>
+                        </div>
+                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 12, flexShrink: 0 }}
+                          onClick={() => addCardToContent(card).then(() => showToast("Added to My Content!"))}>＋ Add</button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           ))}
-          {typing && (
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--sprout-sage)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🗺️</div>
-              <div style={{ padding: "10px 15px", borderRadius: "4px 12px 12px 12px", background: "var(--sprout-cream)" }}>
-                <div className="chat-typing"><span /><span /><span /></div>
-              </div>
-            </div>
-          )}
-          <div ref={endDiv} />
         </div>
-
-        {messages.length <= 1 && (
-          <div className="chat-suggestions-scroll">
-            {PLAN_SUGGESTIONS.map((s, i) => (
-              <button key={i} className="chat-suggestion-chip" onClick={() => sendMessage(s.prompt)}>{s.icon} {s.label}</button>
-            ))}
-          </div>
-        )}
-
-        <div className="chat-input-row">
-          <textarea className="chat-input" placeholder="Describe your goals, ask for a plan, or request partner research…" value={input}
-            onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} rows={1} />
-          <button className="chat-send" onClick={() => sendMessage()} disabled={!input.trim() || typing}>➤</button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
 // ─── Published View ───────────────────────────────────────────────────────────
-function PublishedView({ posts, onOpen }) {
+function PublishedView({ posts, onOpen, addPost, showToast }) {
+  const [importing, setImporting] = useState(false);
   const sorted = [...posts].sort((a, b) => new Date(b.publishedAt || b.updatedAt) - new Date(a.publishedAt || a.updatedAt));
   const totalEng = posts.reduce((s, p) => s + (p.likes || 0) + (p.comments || 0), 0);
   const avgReach = posts.length > 0 ? Math.round(posts.reduce((s, p) => s + (p.reach || 0), 0) / posts.length) : 0;
 
+  const importFromInstagram = async () => {
+    setImporting(true);
+    try {
+      const res = await fetch("/api/instagram", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getMedia" }),
+      });
+      const data = await res.json();
+      if (!data.success || !data.media?.length) { showToast(data.error || "No media returned from Instagram"); setImporting(false); return; }
+      const existingIds = new Set(posts.map(p => p.instagramMediaId).filter(Boolean));
+      const toImport = data.media.filter(m => !existingIds.has(m.id));
+      if (toImport.length === 0) { showToast("All Instagram posts already imported"); setImporting(false); return; }
+      let count = 0;
+      for (const m of toImport) {
+        await addPost({
+          title: m.caption?.split("\n")[0]?.slice(0, 60) || `Instagram post ${m.id.slice(-6)}`,
+          caption: m.caption || "",
+          hashtags: [],
+          status: "published",
+          contentType: m.media_type === "VIDEO" ? "reel" : m.media_type === "CAROUSEL_ALBUM" ? "carousel" : "image",
+          category: "community",
+          mediaItems: [{ id: `m_${Date.now()}_${count}`, url: m.media_url || m.thumbnail_url || "", type: m.media_type === "VIDEO" ? "video" : "image", thumbnailUrl: m.thumbnail_url || m.media_url || "", order: 0 }],
+          instagramMediaId: m.id,
+          publishedAt: m.timestamp || new Date().toISOString(),
+          publishMethod: "manual",
+        });
+        count++;
+      }
+      showToast(`Imported ${count} post${count !== 1 ? "s" : ""} from Instagram`);
+    } catch {
+      showToast("Import failed. Check your connection.");
+    }
+    setImporting(false);
+  };
+
   return (
     <div>
-      <div className="page-header">
-        <h2>🟣 Published Content</h2>
-        <p>All content published to Instagram.</p>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h2>🟣 Published Content</h2>
+          <p>All content published to Instagram.</p>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={importFromInstagram} disabled={importing}>
+          {importing ? <><div className="spinner" style={{ borderTopColor: "var(--sprout-green)", borderColor: "var(--border)" }} /> Importing…</> : "📥 Import from Instagram"}
+        </button>
       </div>
 
       <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: 28 }}>
@@ -3818,16 +4103,107 @@ function MediaView({ showToast, posts, updatePost }) {
     </div>
   );
 }
-function ArchiveView({ posts, restorePost, deletePost, onOpen, showToast }) {
+// ─── Chat History View ────────────────────────────────────────────────────────
+function ChatHistoryView({ chatHistory, saveChatHistory }) {
+  const [expanded, setExpanded] = useState(null);
+
+  return (
+    <div>
+      <div className="page-header">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h2>💬 Chat History</h2>
+            <p>{chatHistory.length} saved thread{chatHistory.length !== 1 ? "s" : ""} · capped at 50.</p>
+          </div>
+          {chatHistory.length > 0 && (
+            <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Clear all chat history?")) saveChatHistory([]); }}>
+              🗑 Clear All
+            </button>
+          )}
+        </div>
+      </div>
+      {chatHistory.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">💬</div>
+          <h3>No chat history yet</h3>
+          <p>Chat threads from the Plans Coach are saved here when you clear them.</p>
+        </div>
+      ) : chatHistory.map(thread => (
+        <div key={thread.id} className="card" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ cursor: "pointer", flex: 1 }} onClick={() => setExpanded(expanded === thread.id ? null : thread.id)}>
+              <div style={{ fontFamily: "Lora, serif", fontSize: 15, fontWeight: 700, color: "var(--sprout-green)", marginBottom: 2 }}>
+                {thread.title || "Untitled session"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {thread.source || "Coach"} · {new Date(thread.savedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })} · {thread.messages?.length || 0} messages
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 12 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setExpanded(expanded === thread.id ? null : thread.id)}>
+                {expanded === thread.id ? "▲ Hide" : "▼ View"}
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={() => saveChatHistory(chatHistory.filter(t => t.id !== thread.id))}>🗑</button>
+            </div>
+          </div>
+          {expanded === thread.id && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10, maxHeight: 400, overflowY: "auto" }}>
+              {(thread.messages || []).map((m, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+                  <div style={{ width: 26, height: 26, borderRadius: "50%", flexShrink: 0, background: m.role === "assistant" ? "var(--sprout-sage)" : "var(--sprout-sky)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>
+                    {m.role === "assistant" ? "🗺️" : "👤"}
+                  </div>
+                  <div style={{ maxWidth: "78%", padding: "8px 12px", fontSize: 13, lineHeight: 1.6, borderRadius: m.role === "user" ? "10px 4px 10px 10px" : "4px 10px 10px 10px", background: m.role === "user" ? "var(--sprout-green)" : "var(--sprout-cream)", color: m.role === "user" ? "#fff" : "var(--text-primary)", whiteSpace: "pre-wrap" }}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ArchiveView({ posts, restorePost, deletePost, onOpen, showToast, archivedPlans, saveArchivedPlans, saveContentPlans, contentPlans }) {
+  const [section, setSection] = useState("posts");
   return (
     <div>
       <div className="page-header">
         <h2>🗄️ Archive</h2>
-        <p>{posts.length} archived post{posts.length !== 1 ? "s" : ""}.</p>
+        <p>{posts.length} post{posts.length !== 1 ? "s" : ""} · {(archivedPlans || []).length} plan{(archivedPlans || []).length !== 1 ? "s" : ""}.</p>
       </div>
-      {posts.length === 0 ? (
-        <div className="empty-state"><div className="icon">🗄️</div><h3>Archive is empty</h3><p>Archived posts will appear here.</p></div>
-      ) : posts.map(post => {
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        <div className={`tab ${section === "posts" ? "active" : ""}`} onClick={() => setSection("posts")}>📋 Posts ({posts.length})</div>
+        <div className={`tab ${section === "plans" ? "active" : ""}`} onClick={() => setSection("plans")}>🗺️ Plans ({(archivedPlans || []).length})</div>
+      </div>
+
+      {section === "plans" && (
+        <div>
+          {(archivedPlans || []).length === 0 ? (
+            <div className="empty-state"><div className="icon">🗺️</div><h3>No archived plans</h3><p>Archive a plan from the Plans page.</p></div>
+          ) : (archivedPlans || []).map(plan => (
+            <div key={plan.id} className="card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontFamily: "Lora, serif", fontSize: 15, fontWeight: 700, color: "var(--sprout-green)" }}>{plan.title}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{plan.cards?.length || 0} posts · Archived {new Date(plan.archivedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { saveContentPlans([...(contentPlans || []), { ...plan, archivedAt: undefined }]); saveArchivedPlans((archivedPlans || []).filter(p => p.id !== plan.id)); showToast("Plan restored"); }}>↩️ Restore</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => { if (window.confirm("Permanently delete this plan?")) { saveArchivedPlans((archivedPlans || []).filter(p => p.id !== plan.id)); showToast("Plan deleted"); } }}>🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {section === "posts" && posts.length === 0 && (
+        <div className="empty-state"><div className="icon">🗄️</div><h3>No archived posts</h3><p>Archived posts will appear here.</p></div>
+      )}
+      {section === "posts" && posts.map(post => {
         const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
         const thumb = post.mediaItems?.[0]?.thumbnailUrl || post.mediaItems?.[0]?.url;
         return (

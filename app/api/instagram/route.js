@@ -83,6 +83,15 @@ export async function POST(request) {
       return Response.json(result?.data || {});
     }
 
+     if (action === 'getMedia') {
+      const result = await composioExecute('INSTAGRAM_GET_USER_MEDIA', {
+        ig_user_id: IG_USER_ID,
+        fields: 'id,caption,media_type,media_url,thumbnail_url,timestamp',
+      });
+      const media = result?.data || [];
+      return Response.json({ success: true, media });
+    }
+
     return Response.json({ error: 'Unknown action' }, { status: 400 });
 
   } catch (error) {
