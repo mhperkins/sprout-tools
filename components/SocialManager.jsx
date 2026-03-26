@@ -2527,10 +2527,9 @@ function MyContentView({ posts, onOpen, showToast, updatePost, addPost, onCreate
       todos: [],
       notes: "",
     });
-    showToast("Post created");
     setShowCreate(false);
-    setForm({ title: "", contentType: "image", category: "community", status: "draft" });
-    if (newPost?.id && onCreated) onCreated(newPost.id);
+setForm({ title: "", contentType: "image", category: "community", status: "draft" });
+if (newPost?.id && onCreated) setTimeout(() => onCreated(newPost.id), 0);
   };
 
   return (
