@@ -289,9 +289,15 @@ const styles = `
   .brand-rule:last-child { border-bottom: none; }
   .brand-rule .rule-label { font-weight: 600; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
 
-  .bar-wrap { display: flex; align-items: flex-end; gap: 5px; height: 120px; margin-top: 10px; }
-  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; }
-  .bar-fill { width: 100%; border-radius: 3px 3px 0 0; opacity: 0.82; transition: all 0.3s; cursor: pointer; }
+  .bar-chart-wrap { display: flex; gap: 8px; margin-top: 10px; }
+  .bar-y-axis { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; min-width: 40px; }
+  .bar-y-label { font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+  .bar-grid { flex: 1; position: relative; height: 220px; }
+  .bar-grid-lines { position: absolute; inset: 0; bottom: 20px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+  .bar-grid-line { width: 100%; border-top: 1px dashed #c0c0c0; }
+  .bar-wrap { display: flex; align-items: flex-end; gap: 5px; height: 200px; position: relative; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .bar-fill { width: 100%; border-radius: 3px 3px 0 0; opacity: 0.82; transition: all 0.3s; cursor: pointer; align-self: flex-end; min-height: 3px; }
   .bar-fill:hover { opacity: 1; }
   .bar-lbl { font-size: 9px; color: var(--text-muted); margin-top: 3px; text-align: center; }
 
@@ -567,11 +573,18 @@ function rowToPost(row) {
     publishMethod: row.publish_method || "manual",
     scheduledAt: row.scheduled_at || "",
     publishedAt: row.published_at || "",
-    mediaItems: row.media_items || [],           // [{ id, url, type, thumbnailUrl, order }]
+    mediaItems: Array.isArray(row.media_items) ? row.media_items : [],          // [{ id, url, type, thumbnailUrl, order }]
     instagramMediaId: row.instagram_media_id || "",
-    likes: row.likes || 0,
+      likes: row.likes || 0,
     comments: row.comments || 0,
     reach: row.reach || 0,
+    views: row.views || 0,
+    saves: row.saves || 0,
+    shares: row.shares || 0,
+    impressions: row.impressions || 0,
+    metricsUpdatedAt: row.metrics_updated_at || null,
+    accountFollowers: row.account_followers || 0,
+    avgWatchTime: row.avg_watch_time || 0,
     hashtags: row.tags || [...BRAND_VOICE.brandHashtags],
     notes: row.notes || "",
     todos: row.todos || [],
@@ -595,9 +608,16 @@ function postToRow(post, userId) {
     published_at: post.publishedAt || null,
     media_items: post.mediaItems || [],
     instagram_media_id: post.instagramMediaId || null,
-    likes: post.likes || 0,
+     likes: post.likes || 0,
     comments: post.comments || 0,
     reach: post.reach || 0,
+    views: post.views || 0,
+    saves: post.saves || 0,
+    shares: post.shares || 0,
+    impressions: post.impressions || 0,
+    metrics_updated_at: post.metricsUpdatedAt || null,
+    account_followers: post.accountFollowers || 0,
+    avg_watch_time: post.avgWatchTime || 0,
     tags: post.hashtags || [...BRAND_VOICE.brandHashtags],
     notes: post.notes || "",
     todos: post.todos || [],
@@ -2066,119 +2086,377 @@ function ApprovalsView({ posts, updatePost, showToast, setView, setEditingPost, 
 
 // ─── Analytics View ──────────────────────────────────────────────────────────
 function AnalyticsView({ posts }) {
-  const published = posts.filter(p => p.status === "published").sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-  const totalLikes = published.reduce((s, p) => s + (p.likes || 0), 0);
-  const totalComments = published.reduce((s, p) => s + (p.comments || 0), 0);
-  const totalReach = published.reduce((s, p) => s + (p.reach || 0), 0);
-  const totalSaves = published.reduce((s, p) => s + (p.saves || 0), 0);
-  const avgEngagement = published.length > 0 ? Math.round((totalLikes + totalComments) / published.length) : 0;
-  const bestPost = published.length > 0 ? published.reduce((best, p) => ((p.likes || 0) + (p.comments || 0)) > ((best.likes || 0) + (best.comments || 0)) ? p : best, published[0]) : null;
-  const maxEng = published.length > 0 ? Math.max(...published.map(p => (p.likes || 0) + (p.comments || 0))) : 1;
+  const [sortBy, setSortBy] = useState("reach");
+  const [activeTab, setActiveTab] = useState("overview");
+  const [chartModal, setChartModal] = useState(null); // post object | null
+  const [activeMedia, setActiveMedia] = useState(0);
+  const [dateRange, setDateRange] = useState("all");
+  const [tableTypeFilter, setTableTypeFilter] = useState("all");  const allPublished = posts.filter(p => p.status === "published").sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const published = dateRange === "all" ? allPublished : allPublished.filter(p => {
+  if (!p.publishedAt) return false;
+  const days = { "7d": 7, "30d": 30, "90d": 90 }[dateRange];
+  return new Date(p.publishedAt) >= new Date(Date.now() - days * 86400000);
+});
+
+  // Aggregates
+  const totalLikes      = published.reduce((s, p) => s + (p.likes || 0), 0);
+  const totalComments   = published.reduce((s, p) => s + (p.comments || 0), 0);
+  const totalReach      = published.reduce((s, p) => s + (p.reach || 0), 0);
+  const totalSaves      = published.reduce((s, p) => s + (p.saves || 0), 0);
+  const totalImpressions = published.reduce((s, p) => s + (p.impressions || 0), 0);
+  const totalShares     = published.reduce((s, p) => s + (p.shares || 0), 0);
+  const totalViews      = published.reduce((s, p) => s + (p.views || 0), 0);
+  const n               = published.length || 1;
+  const avgEngagement   = Math.round((totalLikes + totalComments) / n);
+  const avgReach        = Math.round(totalReach / n);
+  const engRate         = totalReach > 0 ? ((totalLikes + totalComments + totalSaves) / totalReach * 100).toFixed(2) : "0.00";
+  const latestFollowers = published.find(p => p.accountFollowers > 0)?.accountFollowers || 0;
+  const lastRefreshed   = published.find(p => p.metricsUpdatedAt)?.metricsUpdatedAt || null;
+
+  // Reels subset for avg watch time
+  const reels = published.filter(p => p.contentType === "reel" && (p.avgWatchTime || 0) > 0);
+  const avgWatch = reels.length > 0 ? Math.round(reels.reduce((s, p) => s + (p.avgWatchTime || 0), 0) / reels.length) : null;
+
+  // Best post by selected sort
+  const SORT_FIELDS = {
+    reach:       p => p.reach || 0,
+    engagement:  p => (p.likes || 0) + (p.comments || 0),
+    saves:       p => p.saves || 0,
+    impressions: p => p.impressions || 0,
+  };
+  const sortedPosts = [...published].sort((a, b) => (SORT_FIELDS[sortBy](b)) - (SORT_FIELDS[sortBy](a)));
+  const bestPost = sortedPosts[0] || null;
+  const maxVal = sortedPosts.length > 0 ? (SORT_FIELDS[sortBy](sortedPosts[0]) || 1) : 1;
+
+  // Content type breakdown
+  const typeBreakdown = ["image", "reel", "carousel"].map(type => ({
+    type,
+    label: type === "image" ? "📷 Image" : type === "reel" ? "🎬 Reel" : "🎠 Carousel",
+    count: published.filter(p => p.contentType === type).length,
+    reach: published.filter(p => p.contentType === type).reduce((s, p) => s + (p.reach || 0), 0),
+    eng:   published.filter(p => p.contentType === type).reduce((s, p) => s + (p.likes || 0) + (p.comments || 0), 0),
+  })).filter(t => t.count > 0);
+
+  const statCards = [
+    { label: "Followers",       value: latestFollowers > 0 ? latestFollowers.toLocaleString() : "—", sub: "account total",          color: "var(--sprout-green)" },
+    { label: "Total Reach",     value: totalReach.toLocaleString(),       sub: `${published.length} posts`,     color: "var(--sprout-sage)" },
+    { label: "Impressions",     value: totalImpressions > 0 ? totalImpressions.toLocaleString() : "—", sub: "total views incl. repeat", color: "var(--sprout-sky)" },
+    { label: "Engagement Rate", value: `${engRate}%`,                     sub: "(likes+comments+saves)/reach",  color: "var(--sprout-coral)" },
+    { label: "Total Saves",     value: totalSaves.toLocaleString(),       sub: "🔖 bookmarked",                 color: "var(--sprout-gold)" },
+    { label: "Total Shares",    value: totalShares > 0 ? totalShares.toLocaleString() : "—", sub: "↗️ reshared",  color: "var(--sprout-rose)" },
+    { label: "Avg. Reach",      value: avgReach.toLocaleString(),         sub: "per post",                      color: "var(--sprout-sage)" },
+    { label: "Avg. Engagement", value: avgEngagement.toLocaleString(),    sub: "likes + comments / post",       color: "var(--sprout-coral)" },
+  ];
 
   return (
     <div>
       <div className="page-header">
-        <h2>📊 Analytics</h2>
-        <p>Track your content performance. Data updates after posts are published.</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h2>📊 Analytics</h2>
+            <p>Live Instagram metrics — refreshed via Rube every 6 hours.{lastRefreshed && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)" }}>Last sync: {formatDate(lastRefreshed)}</span>}</p>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[{ id: "7d", label: "7 Days" }, { id: "30d", label: "30 Days" }, { id: "90d", label: "90 Days" }, { id: "all", label: "All Time" }].map(r => (
+              <button key={r.id} onClick={() => setDateRange(r.id)} className="btn btn-sm"
+                style={{ background: dateRange === r.id ? "var(--sprout-green)" : "var(--sprout-warm)", color: dateRange === r.id ? "#fff" : "var(--sprout-bark)", padding: "4px 12px", fontSize: 12 }}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="label">Total Reach</div>
-          <div className="value">{totalReach.toLocaleString()}</div>
-          <div className="sub">{published.length} posts</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Total Likes</div>
-          <div className="value">{totalLikes.toLocaleString()}</div>
-          <div className="sub">❤️ across all posts</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Total Comments</div>
-          <div className="value">{totalComments.toLocaleString()}</div>
-          <div className="sub">💬 conversations started</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Avg. Engagement</div>
-          <div className="value">{avgEngagement}</div>
-          <div className="sub">per post (likes + comments)</div>
-        </div>
+      {/* ── Stat Cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
+        {statCards.map(s => (
+          <div key={s.label} className="stat-card">
+            <div className="label">{s.label}</div>
+            <div className="value" style={{ color: s.color, fontSize: 26 }}>{s.value}</div>
+            <div className="sub">{s.sub}</div>
+          </div>
+        ))}
       </div>
 
       {published.length === 0 ? (
         <div className="empty-state">
           <div className="icon">📊</div>
           <h3>No published posts yet</h3>
-          <p>Analytics will appear here once you publish content to Instagram.</p>
+          <p>Analytics will appear once posts are published and Rube has refreshed metrics.</p>
         </div>
       ) : (
         <>
-          <div className="card" style={{ marginBottom: 20 }}>
-            <h3 className="section-title">📈 Engagement by Post</h3>
-            <div className="bar-wrap">
-              {published.slice(0, 12).reverse().map(p => {
-                const eng = (p.likes || 0) + (p.comments || 0);
-                const height = maxEng > 0 ? Math.max((eng / maxEng) * 100, 4) : 4;
-                return (
-                  <div key={p.id} className="bar-col" title={`${p.title || "Post"}: ${eng} engagement`}>
-                    <div className="bar-fill" style={{ height: `${height}%`, background: "var(--sprout-sage)" }} />
-                    <div className="bar-lbl">{truncate(p.title || "Post", 8)}</div>
-                  </div>
-                );
-              })}
-            </div>
+          {/* ── Tabs ── */}
+          <div className="tabs" style={{ marginBottom: 20 }}>
+            {[{ id: "overview", label: "📈 Overview" }, { id: "topPosts", label: "🏆 Top Posts" }, { id: "breakdown", label: "🗂️ By Type" }, { id: "table", label: "📋 All Posts" }].map(t => (
+              <div key={t.id} className={`tab ${activeTab === t.id ? "active" : ""}`} onClick={() => setActiveTab(t.id)}>{t.label}</div>
+            ))}
           </div>
 
-          {bestPost && (
-            <div className="card" style={{ marginBottom: 20, borderColor: "var(--sprout-sage)", borderWidth: 2 }}>
-              <h3 className="section-title">🏆 Best Performing Post</h3>
-              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                <div style={{ width: 64, height: 64, borderRadius: 10, background: "#f0f0f0", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
-                  📷
+          {/* ── Overview Tab ── */}
+{activeTab === "overview" && (
+            <div>
+              <div className="card" style={{ marginBottom: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <h3 className="section-title" style={{ marginBottom: 0 }}>📈 Performance Chart</h3>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {Object.keys(SORT_FIELDS).filter(k => k !== "impressions").map(k => (
+                      <button key={k} onClick={() => setSortBy(k)}
+                        className="btn btn-sm"
+                        style={{ background: sortBy === k ? "var(--sprout-green)" : "var(--sprout-warm)", color: sortBy === k ? "#fff" : "var(--sprout-bark)", padding: "4px 12px", fontSize: 12 }}>
+                        {k.charAt(0).toUpperCase() + k.slice(1)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <h4 style={{ fontFamily: "'Lora', serif", fontSize: 16 }}>{bestPost.title || "Untitled"}</h4>
-                  <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 13 }}>
-                    <span>❤️ {bestPost.likes}</span>
-                    <span>💬 {bestPost.comments}</span>
-                    <span>👁️ {bestPost.reach}</span>
+                <div className="bar-chart-wrap">
+                  <div className="bar-y-axis">
+                    {[1, 0.75, 0.5, 0.25, 0].map(tick => (
+                      <div key={tick} className="bar-y-label">
+                        {Math.round(maxVal * tick).toLocaleString()}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bar-grid">
+                    <div className="bar-grid-lines">
+                      {[0, 1, 2, 3, 4].map(i => <div key={i} className="bar-grid-line" />)}
+                    </div>
+                    <div className="bar-wrap">
+                      {sortedPosts.slice(0, 15).reverse().map(p => {
+                        const val = SORT_FIELDS[sortBy](p);
+                        const height = maxVal > 0 ? Math.max((val / maxVal) * 100, 3) : 3;
+                        return (
+                          <div key={p.id} className="bar-col" title={`${p.title || "Post"}: ${val.toLocaleString()} ${sortBy}`}
+                            onClick={() => { setChartModal(p); setActiveMedia(0); }} style={{ cursor: "pointer" }}>
+                            <div className="bar-fill" style={{ height: `${height}%`, background: "var(--sprout-sage)" }} />
+                            <div className="bar-lbl">{truncate(p.title || "Post", 8)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          <div className="card">
-            <h3 className="section-title">📋 Post Performance</h3>
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Post</th>
-                    <th>Published</th>
-                    <th>❤️ Likes</th>
-                    <th>💬 Comments</th>
-                    <th>👁️ Reach</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {published.map(p => (
-                    <tr key={p.id}>
-                      <td style={{ fontWeight: 600, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {p.title || "Untitled"}
-                      </td>
-                      <td>{formatDate(p.publishedAt)}</td>
-                      <td>{(p.likes || 0).toLocaleString()}</td>
-                      <td>{(p.comments || 0).toLocaleString()}</td>
-                      <td>{(p.reach || 0).toLocaleString()}</td>
-                    </tr>
+          {/* ── Top Posts Tab ── */}
+          {activeTab === "topPosts" && (
+            <div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "var(--text-muted)", alignSelf: "center" }}>Sort by:</span>
+                {Object.keys(SORT_FIELDS).map(k => (
+                  <button key={k} onClick={() => setSortBy(k)}
+                    className="btn btn-sm"
+                    style={{ background: sortBy === k ? "var(--sprout-green)" : "var(--sprout-warm)", color: sortBy === k ? "#fff" : "var(--sprout-bark)", padding: "4px 12px", fontSize: 12 }}>
+                    {k.charAt(0).toUpperCase() + k.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {sortedPosts.slice(0, 10).map((p, idx) => {
+                const val = SORT_FIELDS[sortBy](p);
+                const bar = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                const typeInfo = CONTENT_TYPES.find(t => t.id === p.contentType) || CONTENT_TYPES[0];
+                return (
+              <div key={p.id} className="card card-sm" style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 14, cursor: "pointer" }}
+                   onClick={() => { setChartModal(p); setActiveMedia(0); }}>                    
+                   <div style={{ width: 28, height: 28, borderRadius: "50%", background: idx === 0 ? "var(--sprout-gold)" : "var(--sprout-warm)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, color: idx === 0 ? "#fff" : "var(--sprout-bark)" }}>
+                      {idx + 1}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || "Untitled"}</div>
+                      <div style={{ display: "flex", gap: 12, fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                        <span>{typeInfo.icon} {typeInfo.label}</span>
+                        <span>❤️ {p.likes || 0}</span>
+                        <span>💬 {p.comments || 0}</span>
+                        <span>🔖 {p.saves || 0}</span>
+                        <span>👁️ {(p.reach || 0).toLocaleString()}</span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 3, background: "var(--border)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${bar}%`, background: "var(--sprout-sage)", borderRadius: 3, transition: "width 0.3s" }} />
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0, minWidth: 60 }}>
+                      <div style={{ fontFamily: "Lora, serif", fontSize: 18, fontWeight: 700, color: "var(--sprout-green)" }}>{val.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{sortBy}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── By Type Tab ── */}
+          {activeTab === "breakdown" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+              {typeBreakdown.map(t => (
+                <div key={t.type} className="card">
+                  <h3 className="section-title">{t.label}</h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 8 }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontFamily: "Lora, serif", fontSize: 22, fontWeight: 700, color: "var(--sprout-green)" }}>{t.count}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>posts</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontFamily: "Lora, serif", fontSize: 22, fontWeight: 700, color: "var(--sprout-sage)" }}>{t.reach.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>total reach</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontFamily: "Lora, serif", fontSize: 22, fontWeight: 700, color: "var(--sprout-coral)" }}>{t.eng.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>engagement</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-secondary)" }}>
+                    Avg reach per post: <strong>{t.count > 0 ? Math.round(t.reach / t.count).toLocaleString() : "—"}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── All Posts Table ── */}
+{activeTab === "table" && (
+  <div className="card">
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <h3 className="section-title" style={{ marginBottom: 0 }}>📋 All Posts — Full Metrics</h3>
+      <div style={{ display: "flex", gap: 6 }}>
+        {[{ id: "all", label: "All" }, ...CONTENT_TYPES.map(t => ({ id: t.id, label: `${t.icon} ${t.label}` }))].map(t => (
+          <button key={t.id} onClick={() => setTableTypeFilter(t.id)} className="btn btn-sm"
+            style={{ background: tableTypeFilter === t.id ? "var(--sprout-green)" : "var(--sprout-warm)", color: tableTypeFilter === t.id ? "#fff" : "var(--sprout-bark)", padding: "4px 12px", fontSize: 12 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div style={{ overflowX: "auto" }}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Type</th>
+            <th>Published</th>
+            <th>👁️ Reach</th>
+            <th>📊 Impr.</th>
+            <th>❤️ Likes</th>
+            <th>💬 Cmts</th>
+            <th>🔖 Saves</th>
+            <th>↗️ Shares</th>
+            <th>⏱️ Watch</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedPosts.filter(p => tableTypeFilter === "all" || p.contentType === tableTypeFilter).map(p => {
+            const typeInfo = CONTENT_TYPES.find(t => t.id === p.contentType) || CONTENT_TYPES[0];
+            return (
+              <tr key={p.id} style={{ cursor: "pointer" }} onClick={() => { setChartModal(p); setActiveMedia(0); }}>
+                <td style={{ fontWeight: 600, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title || "Untitled"}</td>
+                <td>{typeInfo.icon} {typeInfo.label}</td>
+                <td>{formatDate(p.publishedAt)}</td>
+                <td>{(p.reach || 0).toLocaleString()}</td>
+                <td>{p.impressions > 0 ? (p.impressions).toLocaleString() : "—"}</td>
+                <td>{(p.likes || 0).toLocaleString()}</td>
+                <td>{(p.comments || 0).toLocaleString()}</td>
+                <td>{p.saves > 0 ? (p.saves).toLocaleString() : "—"}</td>
+                <td>{p.shares > 0 ? (p.shares).toLocaleString() : "—"}</td>
+                <td>{p.avgWatchTime > 0 ? `${Math.round(p.avgWatchTime / 1000)}s` : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}        </>
+      )}
+
+      {/* ── Bar Click Modal ── */}
+      {chartModal && (() => {
+        const p = chartModal;
+        const typeInfo = CONTENT_TYPES.find(t => t.id === p.contentType) || CONTENT_TYPES[0];
+        const mediaItems = p.mediaItems || [];
+        return (
+          <div className="modal-overlay" onClick={() => setChartModal(null)}>
+            <div className="modal-card" style={{ width: 560 }} onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="modal-header">
+                <div>
+                  <div style={{ fontFamily: "'Lora', serif", fontSize: 18, fontWeight: 700, color: "var(--sprout-green)", marginBottom: 2 }}>
+                    {p.title || "Untitled"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {typeInfo.icon} {typeInfo.label} · {formatDate(p.publishedAt)}
+                  </div>
+                </div>
+                <button onClick={() => setChartModal(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--text-muted)", lineHeight: 1 }}>✕</button>
+              </div>
+
+              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Media */}
+                {mediaItems.length > 0 && (
+                  <div>
+                    <div style={{ position: "relative", background: "#000", borderRadius: 10, overflow: "hidden", aspectRatio: "1/1", maxHeight: 320 }}>
+                      {mediaItems[activeMedia]?.type === "video" ? (
+                        <video src={mediaItems[activeMedia].url} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <img src={mediaItems[activeMedia]?.thumbnailUrl || mediaItems[activeMedia]?.url} alt=""
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          onError={e => { e.target.style.display = "none"; }} />
+                      )}
+                      {mediaItems.length > 1 && (
+                        <>
+                          <button onClick={() => setActiveMedia(i => Math.max(0, i - 1))}
+                            style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", background: "rgba(0,0,0,0.5)", border: "none", color: "#fff", borderRadius: "50%", width: 32, height: 32, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }} disabled={activeMedia === 0}>‹</button>
+                          <button onClick={() => setActiveMedia(i => Math.min(mediaItems.length - 1, i + 1))}
+                            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "rgba(0,0,0,0.5)", border: "none", color: "#fff", borderRadius: "50%", width: 32, height: 32, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }} disabled={activeMedia === mediaItems.length - 1}>›</button>
+                          <div style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5 }}>
+                            {mediaItems.map((_, i) => (
+                              <div key={i} onClick={() => setActiveMedia(i)} style={{ width: 7, height: 7, borderRadius: "50%", background: i === activeMedia ? "#fff" : "rgba(255,255,255,0.4)", cursor: "pointer" }} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Caption */}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Caption</div>
+                  {p.caption ? (
+                    <p style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", maxHeight: 160, overflowY: "auto", background: "var(--sprout-cream)", borderRadius: 8, padding: "10px 12px" }}>
+                      {p.caption}
+                    </p>
+                  ) : (
+                    <p style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>No caption saved.</p>
+                  )}
+                  {p.hashtags?.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                      {p.hashtags.map(tag => (
+                        <span key={tag} style={{ fontSize: 12, background: "#E8F4FD", color: "#1E6FA8", padding: "2px 8px", borderRadius: 20 }}>{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Metrics strip */}
+                <div style={{ display: "flex", gap: 16, background: "var(--sprout-cream)", borderRadius: 8, padding: "10px 14px" }}>
+                  {[
+                    { label: "Reach", val: p.reach },
+                    { label: "Likes", val: p.likes },
+                    { label: "Comments", val: p.comments },
+                    { label: "Saves", val: p.saves },
+                  ].map(m => (
+                    <div key={m.label} style={{ textAlign: "center", flex: 1 }}>
+                      <div style={{ fontFamily: "Lora, serif", fontSize: 18, fontWeight: 700, color: "var(--sprout-green)" }}>{(m.val || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{m.label}</div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </div>
             </div>
           </div>
-        </>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -3178,7 +3456,7 @@ function CaptionMediaTab({ post, update, showToast }) {
   const [captionGenerating, setCaptionGenerating] = useState(false);
   const typeInfo = CONTENT_TYPES.find(t => t.id === post.contentType) || CONTENT_TYPES[0];
   const maxMedia = typeInfo.maxMedia || 1;
-  const mediaItems = post.mediaItems || [];
+  const mediaItems = Array.isArray(post.mediaItems) ? post.mediaItems : [];
 
   const saveCaption = () => { update({ caption, hashtags }); showToast("Caption saved"); };
 
