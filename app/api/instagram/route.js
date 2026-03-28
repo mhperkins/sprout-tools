@@ -1,30 +1,34 @@
 /**
  * API Route: /api/instagram
- * Proxies Instagram publishing actions via Composio REST API.
+ * Proxies Instagram actions via Composio /api/v2/actions/proxy endpoint.
  * Actions: 'publish' | 'get_media' | 'check_quota'
  */
 
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY;
-const IG_USER_ID = '26209113175417350';
-const CONNECTED_ACCOUNT_ID = 'ca_mHMSruIA_Y1o';
+const IG_USER_ID = process.env.IG_USER_ID || '26250961947918548';           // test: @test_sprout_2026
+const CONNECTED_ACCOUNT_ID = process.env.COMPOSIO_CONNECTED_ACCOUNT_ID || 'a0a7aebd-5e2a-4dd3-b8d2-702a2ff96341'; // test account
 
-async function composioExecute(toolSlug, input) {
-  const res = await fetch(
-    `https://backend.composio.dev/api/v2/actions/${toolSlug}/execute`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': COMPOSIO_API_KEY,
-      },
-      body: JSON.stringify({
-        connectedAccountId: CONNECTED_ACCOUNT_ID,
-        input,
-      }),
-    }
-  );
+async function composioProxy(endpoint, method = 'POST', body = null) {
+  const payload = {
+    connectedAccountId: CONNECTED_ACCOUNT_ID,
+    endpoint,
+    method,
+    ...(body && { body }),
+  };
+
+  const res = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': COMPOSIO_API_KEY,
+    },
+    body: JSON.stringify(payload),
+  });
+
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.message || `Composio error: ${res.status}`);
+  if (!res.ok || json?.successful === false) {
+    throw new Error(json?.error || json?.message || `Composio proxy error: ${res.status}`);
+  }
   return json;
 }
 
@@ -44,19 +48,17 @@ export async function POST(request) {
       }
 
       // Step 1: Create media container
-      const container = await composioExecute('INSTAGRAM_POST_IG_USER_MEDIA', {
-        ig_user_id: IG_USER_ID,
+      const container = await composioProxy(`/${IG_USER_ID}/media`, 'POST', {
         image_url: imageUrl,
         caption: caption || '',
+        media_type: 'IMAGE',
       });
       const creationId = container?.data?.id;
       if (!creationId) throw new Error('No creation_id returned from media container step');
 
-      // Step 2: Publish container (auto-polls for FINISHED status)
-      const published = await composioExecute('INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH', {
-        ig_user_id: IG_USER_ID,
+      // Step 2: Publish container
+      const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', {
         creation_id: creationId,
-        max_wait_seconds: 90,
       });
       const publishedMediaId = published?.data?.id;
       if (!publishedMediaId) throw new Error('No media_id returned from publish step');
@@ -67,29 +69,46 @@ export async function POST(request) {
     // ── Get published media details ───────────────────────────────────────────
     if (action === 'get_media') {
       if (!mediaId) return Response.json({ error: 'mediaId required' }, { status: 400 });
-      const result = await composioExecute('INSTAGRAM_GET_IG_MEDIA', {
-        ig_media_id: mediaId,
-        fields: 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
-      });
+      const result = await composioProxy(
+        `/${mediaId}?fields=id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count`,
+        'GET'
+      );
       return Response.json(result?.data || {});
     }
 
     // ── Check daily publish quota ─────────────────────────────────────────────
     if (action === 'check_quota') {
-      const result = await composioExecute('INSTAGRAM_GET_IG_USER_CONTENT_PUBLISHING_LIMIT', {
-        ig_user_id: IG_USER_ID,
-        fields: 'quota_usage,config',
-      });
+      const result = await composioProxy(
+        `/${IG_USER_ID}/content_publishing_limit?fields=quota_usage,config`,
+        'GET'
+      );
       return Response.json(result?.data || {});
     }
+    
+// ── Refresh metrics for multiple posts ───────────────────────────────────
+    if (action === 'refresh_metrics') {
+      const { posts } = body;
+      if (!posts?.length) return Response.json({ error: 'posts array required' }, { status: 400 });
 
-     if (action === 'getMedia') {
-      const result = await composioExecute('INSTAGRAM_GET_USER_MEDIA', {
-        ig_user_id: IG_USER_ID,
-        fields: 'id,caption,media_type,media_url,thumbnail_url,timestamp',
-      });
-      const media = result?.data || [];
-      return Response.json({ success: true, media });
+      const results = await Promise.all(
+        posts.map(async ({ postId, mediaId }) => {
+          try {
+            const result = await composioProxy(
+              `/${mediaId}?fields=like_count,comments_count,permalink,timestamp`,
+              'GET'
+            );
+            return {
+              postId,
+              success: true,
+              likes: result?.data?.like_count || 0,
+              comments: result?.data?.comments_count || 0,
+            };
+          } catch (e) {
+            return { postId, success: false, error: e.message };
+          }
+        })
+      );
+      return Response.json({ success: true, results });
     }
 
     return Response.json({ error: 'Unknown action' }, { status: 400 });

@@ -638,6 +638,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [contentPlans, setContentPlans] = useState([]);     // [{ id, title, createdAt, cards: [...] }]
   const [communityOrgs, setCommunityOrgs] = useState([]);   // [{ id, name, type, notes, url, ... }]
   const [strategies, setStrategies] = useState([]);         // [{ id, title, body, createdAt }]
+  const [strategyDocs, setStrategyDocs] = useState([]);     // [{ id, name, type, size, supabasePath, uploadedAt }]
   const [calendarEvents, setCalendarEvents] = useState([]); // [{ id, title, date, type, notes }]
   const [notifications, setNotifications] = useState([]);
   const [chatHistory, setChatHistory] = useState([]);
@@ -671,6 +672,8 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         if (ch) setChatHistory(JSON.parse(ch));
         const ap = localStorage.getItem("sm_archived_plans");
         if (ap) setArchivedPlans(JSON.parse(ap));
+        const sd = localStorage.getItem("sm_strategy_docs");
+        if (sd) setStrategyDocs(JSON.parse(sd));
       } catch {}
 
       setLoading(false);
@@ -688,6 +691,10 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const saveStrategies = (updated) => {
     setStrategies(updated);
     try { localStorage.setItem("sm_strategies", JSON.stringify(updated)); } catch {}
+  };
+  const saveStrategyDocs = (updated) => {
+    setStrategyDocs(updated);
+    try { localStorage.setItem("sm_strategy_docs", JSON.stringify(updated)); } catch {}
   };
   const saveCalendarEvents = (updated) => {
     setCalendarEvents(updated);
@@ -800,7 +807,8 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
   const [publishingId, setPublishingId] = useState(null);
 
   const handlePublishToInstagram = async (post) => {
-    if (!post.imageUrl || post.imageUrl.startsWith('data:')) {
+    const imageUrl = post.mediaItems?.[0]?.url || post.imageUrl;
+    if (!imageUrl || imageUrl.startsWith('data:')) {
       showToast('A public Image URL is required to publish to Instagram.');
       return;
     }
@@ -811,7 +819,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'publish',
-          imageUrl: post.imageUrl,
+          imageUrl: imageUrl,
           caption: [post.caption, ...(post.hashtags || [])].filter(Boolean).join('\n\n'),
         }),
       });
@@ -830,6 +838,41 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
       showToast('Publish failed. Check your connection.');
     }
     setPublishingId(null);
+  };
+
+const handleRefreshMetrics = async () => {
+    const publishedWithMedia = posts.filter(p => p.status === 'published' && p.instagramMediaId);
+    if (!publishedWithMedia.length) { showToast('No published posts with media IDs.'); return; }
+
+    showToast('Refreshing metrics…');
+    try {
+      const res = await fetch('/api/instagram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'refresh_metrics',
+          posts: publishedWithMedia.map(p => ({ postId: p.id, mediaId: p.instagramMediaId })),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      // Write each result back to Supabase
+      await Promise.all(
+        data.results.filter(r => r.success).map(r =>
+          supabase
+            .from('social_posts')
+            .update({ likes: r.likes, comments: r.comments, metrics_updated_at: new Date().toISOString() })
+            .eq('id', r.postId)
+        )
+      );
+
+      // Refresh local posts state
+      await loadPosts();
+      showToast(`Metrics updated for ${data.results.filter(r => r.success).length} posts.`);
+    } catch (e) {
+      showToast(`Metrics refresh failed: ${e.message}`);
+    }
   };
 
   // ── Stats ───────────────────────────────────────────────────────────────
@@ -928,10 +971,6 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
     <div className={`nav-item ${view === "media" ? "active" : ""}`} onClick={() => setView("media")} title="Media">
       <span style={{ fontSize: 15 }}>🖼️</span> <span className="nav-text">Media</span>
     </div>
-    <div className={`nav-item ${view === "strategies" ? "active" : ""}`} onClick={() => setView("strategies")} title="Strategies">
-      <span style={{ fontSize: 15 }}>🧭</span> <span className="nav-text">Strategies</span>
-      {strategies.length > 0 && <span className="badge">{strategies.length}</span>}
-    </div>
     <div className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => setView("archive")} title="Archive">
       <span style={{ fontSize: 15 }}>🗄️</span> <span className="nav-text">Archive</span>
       {posts.filter(p => p.status === "archived").length > 0 && <span className="badge">{posts.filter(p => p.status === "archived").length}</span>}
@@ -973,13 +1012,13 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
         {/* ── Main Content ── */}
         <main className={`main ${sidebarCollapsed ? "collapsed" : ""}`}>
           {view === "dashboard" && (
-            <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} setSelectedPost={setSelectedPost} />
+            <DashboardView stats={stats} posts={posts} contentPlans={contentPlans} setView={setView} setSelectedPost={setSelectedPost} onRefreshMetrics={handleRefreshMetrics} />
           )}
           {view === "calendar" && (
             <CalendarView posts={posts} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setView={setView} setSelectedPost={setSelectedPost} calView={calView} setCalView={setCalView} setPrevView={setPrevView} calDate={calDate} setCalDate={setCalDate} />
           )}
           {view === "plans" && (
-            <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} chatHistory={chatHistory} saveChatHistory={saveChatHistory} archivedPlans={archivedPlans} saveArchivedPlans={saveArchivedPlans} />
+            <PlansView contentPlans={contentPlans} saveContentPlans={saveContentPlans} posts={posts} addPost={addPost} showToast={showToast} communityOrgs={communityOrgs} calendarEvents={calendarEvents} saveCommunityOrgs={saveCommunityOrgs} saveStrategies={saveStrategies} strategies={strategies} chatHistory={chatHistory} saveChatHistory={saveChatHistory} archivedPlans={archivedPlans} saveArchivedPlans={saveArchivedPlans} strategyDocs={strategyDocs} saveStrategyDocs={saveStrategyDocs} />
           )}
           {view === "myContent" && (
             <MyContentView posts={posts.filter(p => p.status !== "published" && p.status !== "archived")} onOpen={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} updatePost={updatePost} addPost={addPost} onCreated={(id) => { setPrevView("myContent"); setSelectedPost(id); setView("contentDetail"); }} archivePost={archivePost} calendarEvents={calendarEvents} saveCalendarEvents={saveCalendarEvents} setViewMain={setView} setSelectedPostMain={setSelectedPost} setPrevViewMain={setPrevView} />
@@ -996,7 +1035,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
             <PublishedView posts={posts.filter(p => p.status === "published")} onOpen={(id) => { setSelectedPost(id); setView("contentDetail"); }} addPost={addPost} showToast={showToast} />
           )}
           {view === "analytics" && (
-            <AnalyticsView posts={posts} />
+            <AnalyticsView posts={posts} onRefreshMetrics={handleRefreshMetrics} />
           )}
           {view === "brandVoice" && (
             <BrandVoiceView />
@@ -1006,9 +1045,6 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
           )}
           {view === "media" && (
             <MediaView showToast={showToast} posts={posts} updatePost={updatePost} />
-          )}
-          {view === "strategies" && (
-            <StrategiesView strategies={strategies} saveStrategies={saveStrategies} showToast={showToast} />
           )}
           {view === "archive" && (
             <ArchiveView posts={posts.filter(p => p.status === "archived")} restorePost={restorePost} deletePost={deletePost} onOpen={(id) => { setPrevView("archive"); setSelectedPost(id); setView("contentDetail"); }} showToast={showToast} archivedPlans={archivedPlans} saveArchivedPlans={saveArchivedPlans} saveContentPlans={saveContentPlans} contentPlans={contentPlans} />
@@ -1080,7 +1116,7 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
 }
 
 // ─── Dashboard View ──────────────────────────────────────────────────────────
-function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost }) {
+function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost, onRefreshMetrics }) {
   const recentPosts = [...posts].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
   const scheduledPosts = posts.filter(p => p.status === "scheduled" && p.scheduledAt)
     .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)).slice(0, 5);
@@ -1097,10 +1133,15 @@ function DashboardView({ stats, posts, contentPlans, setView, setSelectedPost })
 
   return (
     <div>
-      <div className="page-header">
-        <h2>🌿 Social Dashboard</h2>
-        <p>Your content pipeline at a glance.</p>
-      </div>
+<div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+  <div>
+    <h2>🌿 Social Dashboard</h2>
+    <p>Your content pipeline at a glance.</p>
+  </div>
+  <button className="btn btn-sm" onClick={onRefreshMetrics} style={{ background: "var(--sprout-green)", color: "#fff" }}>
+    🔄 Refresh Metrics
+  </button>
+</div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
         {lifecycleStats.map(s => (
@@ -2085,7 +2126,7 @@ function ApprovalsView({ posts, updatePost, showToast, setView, setEditingPost, 
 }
 
 // ─── Analytics View ──────────────────────────────────────────────────────────
-function AnalyticsView({ posts }) {
+function AnalyticsView({ posts, onRefreshMetrics }) {
   const [sortBy, setSortBy] = useState("reach");
   const [activeTab, setActiveTab] = useState("overview");
   const [chartModal, setChartModal] = useState(null); // post object | null
@@ -2156,8 +2197,11 @@ function AnalyticsView({ posts }) {
             <h2>📊 Analytics</h2>
             <p>Live Instagram metrics — refreshed via Rube every 6 hours.{lastRefreshed && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)" }}>Last sync: {formatDate(lastRefreshed)}</span>}</p>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {[{ id: "7d", label: "7 Days" }, { id: "30d", label: "30 Days" }, { id: "90d", label: "90 Days" }, { id: "all", label: "All Time" }].map(r => (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+  <button className="btn btn-sm" onClick={onRefreshMetrics} style={{ background: "var(--sprout-green)", color: "#fff", marginRight: 8 }}>
+    🔄 Refresh Metrics
+  </button>
+  {[{ id: "7d", label: "7 Days" }, { id: "30d", label: "30 Days" }, { id: "90d", label: "90 Days" }, { id: "all", label: "All Time" }].map(r => (
               <button key={r.id} onClick={() => setDateRange(r.id)} className="btn btn-sm"
                 style={{ background: dateRange === r.id ? "var(--sprout-green)" : "var(--sprout-warm)", color: dateRange === r.id ? "#fff" : "var(--sprout-bark)", padding: "4px 12px", fontSize: 12 }}>
                 {r.label}
@@ -3601,6 +3645,33 @@ function CaptionMediaTab({ post, update, showToast }) {
         )}
       </div>
 
+  <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h3 className="section-title" style={{ marginBottom: 4, borderBottom: "none", paddingBottom: 0 }}>Publish Method</h3>
+            <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Automated posts are picked up by the Rube recipe. Manual posts require you to publish directly.</p>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+          {["automated", "manual"].map(method => (
+            <button
+              key={method}
+              onClick={() => { update({ publishMethod: method }); showToast(`Publish method set to ${method}`); }}
+              style={{
+                flex: 1, padding: "12px 16px", borderRadius: 10, border: "2px solid",
+                borderColor: post.publishMethod === method ? (method === "automated" ? "#166534" : "var(--sprout-earth)") : "var(--border)",
+                background: post.publishMethod === method ? (method === "automated" ? "#DCFCE7" : "var(--sprout-warm)") : "#fff",
+                color: post.publishMethod === method ? (method === "automated" ? "#166534" : "var(--sprout-bark)") : "var(--text-muted)",
+                fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "DM Sans, sans-serif",
+                transition: "all 0.15s",
+              }}
+            >
+              {method === "automated" ? "⚡ Automated" : "✋ Manual"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {showLibrary && (
         <div className="modal-overlay" onClick={() => setShowLibrary(false)}>
           <div className="modal-card" style={{ width: 700, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
@@ -3686,7 +3757,7 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
                 <option value="scheduled">⏰ Scheduled</option>
                 <option value="published">🟣 Published</option>
               </select>
-              {post.status === "ready" && post.publishMethod === "automated" && (
+              {post.status === "ready" && (
                 <button className="btn btn-primary" onClick={() => onPublish(post)} disabled={publishingId === post.id}>
                   {publishingId === post.id ? <><div className="spinner" /> Publishing…</> : <>📤 Publish to Instagram</>}
                 </button>
@@ -3720,7 +3791,7 @@ function ContentDetailView({ postId, posts, updatePost, deletePost, showToast, o
 // ─── Plans View ───────────────────────────────────────────────────────────────
 const COACH_INITIAL_MSG = { role: "assistant", content: "Hi! I'm your content planning coach. Tell me your goals and I'll create a detailed content plan. 🗺️\n\nI can:\n• Build a multi-week content plan\n• Create an event or campaign plan\n• Develop an overall strategy\n• Find partner orgs to collaborate with\n\nWhenever I produce something worth saving, I'll ask you before adding it anywhere." };
 
-function PlansView({ contentPlans, saveContentPlans, posts, addPost, showToast, communityOrgs, calendarEvents, saveCommunityOrgs, saveStrategies, strategies, chatHistory, saveChatHistory, archivedPlans, saveArchivedPlans }) {
+function PlansView({ contentPlans, saveContentPlans, posts, addPost, showToast, communityOrgs, calendarEvents, saveCommunityOrgs, saveStrategies, strategies, chatHistory, saveChatHistory, archivedPlans, saveArchivedPlans, strategyDocs, saveStrategyDocs }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [plansTab, setPlansTab] = useState("coach");
   const [messages, setMessages] = useState(() => {
@@ -3770,23 +3841,69 @@ For community orgs:
 {"type":"propose_community","orgs":[{"name":"...","type":"partner|collaborator","notes":"...","url":""}]}
 \`\`\`
 
-CRITICAL: Always ask the user what they'd like to do with your output. Never assume they want to save it. The app will show confirmation buttons inline.`;
+CRITICAL: Always ask the user what they'd like to do with your output. Never assume they want to save it. The app will show confirmation buttons inline.${(strategyDocs && strategyDocs.length > 0) ? `
+
+UPLOADED STRATEGY DOCS (${strategyDocs.length} available):
+${strategyDocs.map(d => `• "${d.name}" (${d.type}, uploaded ${new Date(d.uploadedAt).toLocaleDateString()})`).join("\n")}
+
+If the user references one of these docs, say: FETCH_DOC:"<exact filename>" on its own line and I will inject the content for you.` : ""}`;
   };
 
   const sendMessage = async (text) => {
     const userText = (text || input).trim();
     if (!userText || typing) return;
     setInput("");
-    const newMessages = [...messages, { role: "user", content: userText }];
+    let newMessages = [...messages, { role: "user", content: userText }];
     persistMessages(newMessages);
     setTyping(true);
+
+    // Check if AI previously requested a doc fetch in last assistant message
+    const lastAssistant = [...newMessages].reverse().find(m => m.role === "assistant");
+    const fetchMatch = lastAssistant?.content?.match(/FETCH_DOC:"([^"]+)"/);
+    let injectedContext = "";
+    if (fetchMatch) {
+      const docName = fetchMatch[1];
+      const doc = (strategyDocs || []).find(d => d.name === docName);
+      if (doc) {
+        try {
+          const { data } = await supabase.storage.from("strategy-docs").download(doc.supabasePath);
+          if (data) {
+            const text = await data.text();
+            injectedContext = `\n\n[DOC CONTENT: "${docName}"]\n${text.slice(0, 8000)}\n[END DOC]`;
+          }
+        } catch {}
+      }
+    }
+
+    // Also check current user message for doc references
+    if (!injectedContext && strategyDocs?.length > 0) {
+      const mentionedDoc = strategyDocs.find(d =>
+        userText.toLowerCase().includes(d.name.toLowerCase().replace(/\.[^.]+$/, ""))
+      );
+      if (mentionedDoc) {
+        try {
+          const { data } = await supabase.storage.from("strategy-docs").download(mentionedDoc.supabasePath);
+          if (data) {
+            const docText = await data.text();
+            injectedContext = `\n\n[DOC CONTENT: "${mentionedDoc.name}"]\n${docText.slice(0, 8000)}\n[END DOC]`;
+          }
+        } catch {}
+      }
+    }
+
+    const messagesForAPI = newMessages.map((m, i) => {
+      if (injectedContext && i === newMessages.length - 1 && m.role === "user") {
+        return { role: "user", content: m.content + injectedContext };
+      }
+      return { role: m.role, content: m.content };
+    });
     try {
       const res = await fetch("/api/ai", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514", max_tokens: 3000,
           system: buildContext(),
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          messages: messagesForAPI,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
         }),
       });
@@ -3873,6 +3990,8 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
       <div className="tabs" style={{ marginBottom: 20 }}>
         <div className={`tab ${plansTab === "coach" ? "active" : ""}`} onClick={() => setPlansTab("coach")}>🗺️ Coach</div>
         <div className={`tab ${plansTab === "savedPlans" ? "active" : ""}`} onClick={() => setPlansTab("savedPlans")}>📋 Saved Plans ({contentPlans.length})</div>
+        <div className={`tab ${plansTab === "strategies" ? "active" : ""}`} onClick={() => setPlansTab("strategies")}>🧭 Strategies ({strategies.length})</div>
+        <div className={`tab ${plansTab === "documents" ? "active" : ""}`} onClick={() => setPlansTab("documents")}>📁 Documents ({(strategyDocs || []).length})</div>
       </div>
 
       {/* ── Coach Tab ── */}
@@ -4003,11 +4122,126 @@ CRITICAL: Always ask the user what they'd like to do with your output. Never ass
           ))}
         </div>
       )}
+
+      {/* ── Strategies Tab ── */}
+      {plansTab === "strategies" && (
+        <div>
+          {strategies.length === 0 ? (
+            <div className="empty-state">
+              <div className="icon">🧭</div>
+              <h3>No strategies yet</h3>
+              <p>Ask the AI coach to create a strategy and save it here.</p>
+              <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setPlansTab("coach")}>Open Coach →</button>
+            </div>
+          ) : strategies.map(s => (
+            <div key={s.id} className="card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <h3 style={{ fontFamily: "Lora, serif", fontSize: 16, color: "var(--sprout-green)" }}>{s.title}</h3>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                  <button className="btn btn-danger btn-sm" onClick={() => { saveStrategies(strategies.filter(x => x.id !== s.id)); showToast("Strategy deleted"); }}>🗑</button>
+                </div>
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{s.body}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* ── Documents Tab ── */}
+      {plansTab === "documents" && (
+        <DocumentsTab strategyDocs={strategyDocs || []} saveStrategyDocs={saveStrategyDocs} showToast={showToast} />
+      )}
     </div>
   );
 }
 
-// ─── Published View ───────────────────────────────────────────────────────────
+// ─── Documents Tab ────────────────────────────────────────────────────────────
+function DocumentsTab({ strategyDocs, saveStrategyDocs, showToast }) {
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  const ACCEPTED = ".pdf,.docx,.txt";
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"];
+    if (!allowed.includes(file.type)) { showToast("Unsupported file type"); return; }
+    if (file.size > 10 * 1024 * 1024) { showToast("File must be under 10MB"); return; }
+    setUploading(true);
+    try {
+      const path = `${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
+      const { error } = await supabase.storage.from("strategy-docs").upload(path, file, { contentType: file.type });
+      if (error) throw error;
+      const newDoc = { id: `doc_${Date.now()}`, name: file.name, type: file.type, size: file.size, supabasePath: path, uploadedAt: new Date().toISOString() };
+      const updated = [newDoc, ...strategyDocs];
+      saveStrategyDocs(updated);
+      showToast(`"${file.name}" uploaded`);
+    } catch (err) {
+      showToast("Upload failed: " + err.message);
+    }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const handleDelete = async (doc) => {
+    if (!window.confirm(`Delete "${doc.name}"?`)) return;
+    try {
+      await supabase.storage.from("strategy-docs").remove([doc.supabasePath]);
+    } catch {}
+    saveStrategyDocs(strategyDocs.filter(d => d.id !== doc.id));
+    showToast("Document deleted");
+  };
+
+  const typeIcon = (type) => {
+    if (type === "application/pdf") return "📄";
+    if (type.includes("wordprocessing")) return "📝";
+    return "📃";
+  };
+
+  const fileSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Upload strategy docs the AI coach can reference. Say <em>"use my [filename] doc"</em> in chat to pull it in.</p>
+        </div>
+        <div>
+          <input ref={fileRef} type="file" accept={ACCEPTED} style={{ display: "none" }} onChange={handleUpload} />
+          <button className="btn btn-primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
+            {uploading ? <><div className="spinner" /> Uploading…</> : "⬆️ Upload Doc"}
+          </button>
+        </div>
+      </div>
+
+      {strategyDocs.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">📁</div>
+          <h3>No documents yet</h3>
+          <p>Upload PDFs, Word docs, or text files. The coach can read them on demand.</p>
+        </div>
+      ) : strategyDocs.map(doc => (
+        <div key={doc.id} className="card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ fontSize: 28, flexShrink: 0 }}>{typeIcon(doc.type)}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.name}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{fileSize(doc.size)} · Uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => { navigator.clipboard.writeText(doc.name.replace(/\.[^.]+$/, "")); showToast("Name copied — paste in coach chat"); }}>📋 Copy name</button>
+            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(doc)}>🗑</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PublishedView({ posts, onOpen, addPost, showToast }) {
   const [importing, setImporting] = useState(false);
   const sorted = [...posts].sort((a, b) => new Date(b.publishedAt || b.updatedAt) - new Date(a.publishedAt || a.updatedAt));
