@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sprout Society Tools
 
-## Getting Started
+An internal dashboard for Sprout Society with two integrated tools: a **Grant Manager** for finding and tracking grant applications, and a **Social Manager** for planning and publishing Instagram content.
 
-First, run the development server:
+---
+
+## Features
+
+### Grant Manager
+- Search for grants with AI-powered web search
+- Save grants and track application status
+- Manage deadlines with a dashboard overview
+- Write and store grant answers, notes, and task lists per application
+- Auto-search schedules with notifications for new matches
+- Org profile builder for reusable application content
+- Document and strategy library upload
+- AI chat assistant for drafting and research
+
+### Social Manager
+- Content calendar (day / week / month views)
+- Draft, approve, and schedule posts
+- Publish images, carousels, reels, and stories directly to Instagram
+- Import existing Instagram media
+- AI caption generation with brand voice settings
+- Analytics dashboard with engagement metrics
+- Media library (Cloudinary)
+- Archive and chat history
+
+---
+
+## Tech Stack
+
+- **Framework:** Next.js 16 (App Router)
+- **UI:** React 19, Tailwind CSS v4
+- **Auth & Database:** Supabase
+- **AI:** Anthropic Claude API (claude-sonnet-4)
+- **Instagram:** Composio proxy → Instagram Graph API
+- **Media:** Cloudinary
+
+---
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment variables
+
+Create a `.env.local` file in the project root:
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+# Anthropic
+ANTHROPIC_API_KEY=
+
+# Composio + Instagram
+COMPOSIO_API_KEY=
+COMPOSIO_CONNECTED_ACCOUNT_ID=
+IG_USER_ID=
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+```
+
+### 3. Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Project Structure
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/
+  page.js                  # Auth + tool hub (home screen)
+  api/
+    ai/route.js            # Anthropic API proxy
+    ai/cloudinary/route.js # Cloudinary media fetch
+    ai/upload/             # Media upload routes
+    instagram/route.js     # Instagram publish/fetch via Composio
+components/
+  GrantManager.jsx         # Full grant management UI
+  SocialManager.jsx        # Full social media management UI
+```

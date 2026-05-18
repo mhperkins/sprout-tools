@@ -5,8 +5,8 @@
  */
 
 const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY;
-const IG_USER_ID = process.env.IG_USER_ID || '26250961947918548';           // test: @test_sprout_2026
-const CONNECTED_ACCOUNT_ID = process.env.COMPOSIO_CONNECTED_ACCOUNT_ID || 'a0a7aebd-5e2a-4dd3-b8d2-702a2ff96341'; // test account
+const IG_USER_ID = process.env.IG_USER_ID || '26250961947918548';
+const CONNECTED_ACCOUNT_ID = process.env.COMPOSIO_CONNECTED_ACCOUNT_ID || 'a0a7aebd-5e2a-4dd3-b8d2-702a2ff96341';
 
 async function composioProxy(endpoint, method = 'POST', body = null) {
   const payload = {
@@ -15,7 +15,6 @@ async function composioProxy(endpoint, method = 'POST', body = null) {
     method,
     ...(body && { body }),
   };
-
   const res = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
     method: 'POST',
     headers: {
@@ -24,7 +23,6 @@ async function composioProxy(endpoint, method = 'POST', body = null) {
     },
     body: JSON.stringify(payload),
   });
-
   const json = await res.json();
   if (!res.ok || json?.successful === false) {
     throw new Error(json?.error || json?.message || `Composio proxy error: ${res.status}`);
@@ -39,30 +37,97 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { action, imageUrl, caption, mediaId } = body;
+    const { action, imageUrl, caption, mediaId, contentType, mediaItems, thumbnailUrl } = body;
 
     // ── Publish ──────────────────────────────────────────────────────────────
     if (action === 'publish') {
-      if (!imageUrl) {
-        return Response.json({ error: 'imageUrl is required' }, { status: 400 });
+
+      // ── CAROUSEL ────────────────────────────────────────────────────────────
+      if (contentType === 'carousel' && mediaItems?.length > 0) {
+        // Step 1: Create child containers for each media item
+        const childIds = [];
+        for (const item of mediaItems) {
+          const isVideo = item.type === 'video';
+          const childBody = isVideo
+            ? { video_url: item.url, media_type: 'VIDEO', is_carousel_item: true }
+            : { image_url: item.url, media_type: 'IMAGE', is_carousel_item: true };
+          const child = await composioProxy(`/${IG_USER_ID}/media`, 'POST', childBody);
+          const childId = child?.data?.id;
+          if (!childId) throw new Error(`No id returned for carousel child item`);
+          childIds.push(childId);
+        }
+
+        // Step 2: Create carousel parent container
+        const parent = await composioProxy(`/${IG_USER_ID}/media`, 'POST', {
+          media_type: 'CAROUSEL',
+          children: childIds.join(','),
+          caption: caption || '',
+        });
+        const creationId = parent?.data?.id;
+        if (!creationId) throw new Error('No creation_id returned from carousel container step');
+
+        // Step 3: Publish
+        const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
+        const publishedMediaId = published?.data?.id;
+        if (!publishedMediaId) throw new Error('No media_id returned from carousel publish step');
+        return Response.json({ success: true, media_id: publishedMediaId });
       }
 
-      // Step 1: Create media container
+      // ── REEL ─────────────────────────────────────────────────────────────────
+      if (contentType === 'reel') {
+        const videoUrl = mediaItems?.[0]?.url || imageUrl;
+        if (!videoUrl) return Response.json({ error: 'videoUrl is required for reels' }, { status: 400 });
+
+        const reelBody = {
+          media_type: 'REELS',
+          video_url: videoUrl,
+          caption: caption || '',
+        };
+        if (thumbnailUrl) reelBody.cover_url = thumbnailUrl;
+
+        const container = await composioProxy(`/${IG_USER_ID}/media`, 'POST', reelBody);
+        const creationId = container?.data?.id;
+        if (!creationId) throw new Error('No creation_id returned from reel container step');
+
+        const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
+        const publishedMediaId = published?.data?.id;
+        if (!publishedMediaId) throw new Error('No media_id returned from reel publish step');
+        return Response.json({ success: true, media_id: publishedMediaId });
+      }
+
+      // ── STORY ────────────────────────────────────────────────────────────────
+      if (contentType === 'story') {
+        const storyUrl = mediaItems?.[0]?.url || imageUrl;
+        if (!storyUrl) return Response.json({ error: 'imageUrl is required for story' }, { status: 400 });
+
+        const container = await composioProxy(`/${IG_USER_ID}/media`, 'POST', {
+          media_type: 'STORIES',
+          image_url: storyUrl,
+        });
+        const creationId = container?.data?.id;
+        if (!creationId) throw new Error('No creation_id returned from story container step');
+
+        const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
+        const publishedMediaId = published?.data?.id;
+        if (!publishedMediaId) throw new Error('No media_id returned from story publish step');
+        return Response.json({ success: true, media_id: publishedMediaId });
+      }
+
+      // ── IMAGE (default: post) ────────────────────────────────────────────────
+      const finalImageUrl = mediaItems?.[0]?.url || imageUrl;
+      if (!finalImageUrl) return Response.json({ error: 'imageUrl is required' }, { status: 400 });
+
       const container = await composioProxy(`/${IG_USER_ID}/media`, 'POST', {
-        image_url: imageUrl,
+        image_url: finalImageUrl,
         caption: caption || '',
         media_type: 'IMAGE',
       });
       const creationId = container?.data?.id;
       if (!creationId) throw new Error('No creation_id returned from media container step');
 
-      // Step 2: Publish container
-      const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', {
-        creation_id: creationId,
-      });
+      const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
       const publishedMediaId = published?.data?.id;
       if (!publishedMediaId) throw new Error('No media_id returned from publish step');
-
       return Response.json({ success: true, media_id: publishedMediaId });
     }
 
@@ -79,42 +144,16 @@ export async function POST(request) {
     // ── Check daily publish quota ─────────────────────────────────────────────
     if (action === 'check_quota') {
       const result = await composioProxy(
-        `/${IG_USER_ID}/content_publishing_limit?fields=quota_usage,config`,
+        `/${IG_USER_ID}/content_publishing_limit?fields=config,quota_usage`,
         'GET'
       );
       return Response.json(result?.data || {});
     }
-    
-// ── Refresh metrics for multiple posts ───────────────────────────────────
-    if (action === 'refresh_metrics') {
-      const { posts } = body;
-      if (!posts?.length) return Response.json({ error: 'posts array required' }, { status: 400 });
 
-      const results = await Promise.all(
-        posts.map(async ({ postId, mediaId }) => {
-          try {
-            const result = await composioProxy(
-              `/${mediaId}?fields=like_count,comments_count,permalink,timestamp`,
-              'GET'
-            );
-            return {
-              postId,
-              success: true,
-              likes: result?.data?.like_count || 0,
-              comments: result?.data?.comments_count || 0,
-            };
-          } catch (e) {
-            return { postId, success: false, error: e.message };
-          }
-        })
-      );
-      return Response.json({ success: true, results });
-    }
-
-    return Response.json({ error: 'Unknown action' }, { status: 400 });
+    return Response.json({ error: `Unknown action: ${action}` }, { status: 400 });
 
   } catch (error) {
-    console.error('Instagram route error:', error);
+    console.error('Instagram API error:', error);
     return Response.json({ error: error.message || 'Instagram request failed' }, { status: 500 });
   }
 }

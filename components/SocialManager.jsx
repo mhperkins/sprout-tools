@@ -817,22 +817,35 @@ export default function SocialManager({ onLogout, userEmail, onSwitchTool }) {
       const res = await fetch('/api/instagram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'publish',
-          imageUrl: imageUrl,
-          caption: [post.caption, ...(post.hashtags || [])].filter(Boolean).join('\n\n'),
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        await updatePost(post.id, {
-          status: 'published',
-          instagramMediaId: data.media_id,
-          publishedAt: new Date().toISOString(),
-        });
-        showToast('Published to Instagram! 🎉');
-      } else {
-        showToast(`Publish failed: ${data.error}`);
+body: JSON.stringify({
+  action: 'publish',
+  imageUrl: imageUrl,
+  caption: [post.caption, ...(post.hashtags || [])].filter(Boolean).join('\n\n'),
+  contentType: post.contentType,
+  mediaItems: post.mediaItems,
+  thumbnailUrl: post.thumbnailUrl,     
+}),
+      }); 
+  
+  const data = await res.json();
+
+if (data.success) {
+  const storageUrl = post.mediaItems?.[0]?.url || post.imageUrl;
+  if (storageUrl) {
+    try {
+      const url = new URL(storageUrl);
+      const pathParts = url.pathname.split('/post-images/');
+      if (pathParts.length > 1) {
+        await supabase.storage.from('post-images').remove([pathParts[1]]);
+      }
+    } catch {}
+  }
+  await updatePost(post.id, {
+    status: 'published',
+    instagramMediaId: data.media_id,
+    publishedAt: new Date().toISOString(),
+  });
+  showToast('Published to Instagram! 🎉');
       }
     } catch {
       showToast('Publish failed. Check your connection.');
@@ -1714,7 +1727,8 @@ function EditorView({ post, addPost, updatePost, deletePost, showToast, setView,
 
   const publishNow = () => {
   if (form.status !== "approved") return;
-  if (!form.imageUrl?.trim()) { showToast("Add a public image URL before publishing"); return; }
+  const hasMedia = form.mediaItems?.length > 0 || form.imageUrl?.trim();
+  if (!hasMedia) { showToast("Add media before publishing"); return; }
   setShowConfirm(true);
 };
 
@@ -4486,43 +4500,54 @@ function useMediaLibrary() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refresh = () => setRefreshKey(k => k + 1);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       const results = [];
       try {
-        const { data, error: sbErr } = await supabase.storage.from("post-images").list("", { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not authenticated");
+
+        const { data, error: sbErr } = await supabase.storage
+          .from("post-images")
+          .list(user.id, { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+
         if (!sbErr && data) {
-          const { data: { publicUrl: base } } = supabase.storage.from("post-images").getPublicUrl("");
-          const baseUrl = base.replace(/\/$/, "");
           data.filter(f => f.name && !f.name.startsWith(".")).forEach(f => {
-            results.push({ id: `sb_${f.id || f.name}`, name: f.name, url: `${baseUrl}/${f.name}`, type: "image", source: "supabase" });
+            const { data: { publicUrl } } = supabase.storage
+              .from("post-images")
+              .getPublicUrl(`${user.id}/${f.name}`);
+            const isVideo = /\.(mp4|mov|webm)$/i.test(f.name);
+            results.push({
+              id: `sb_${f.id || f.name}`,
+              name: f.name,
+              url: publicUrl,
+              type: isVideo ? "video" : "image",
+              source: "supabase",
+            });
           });
         }
-      } catch {}
-      try {
-        const res = await fetch("/api/cloudinary");
-        if (res.ok) {
-          const { resources } = await res.json();
-          (resources || []).forEach(r => {
-            const posterUrl = r.secure_url.replace("/upload/", "/upload/so_0,f_jpg/");
-            results.push({ id: `cl_${r.public_id}`, name: r.public_id.split("/").pop(), url: r.secure_url, thumbnailUrl: posterUrl, type: "video", source: "cloudinary" });
-          });
-        }
-      } catch {}
+      } catch (e) {
+        setError(e.message);
+      }
       setItems(results);
       setLoading(false);
     })();
-  }, []);
+  }, [refreshKey]);
 
-  return { items, loading, error };
+  return { items, loading, error, refresh };
 }
 
 function MediaPickerGrid({ onAttach, attachLabel = "Attach", selectedIds = [] }) {
-  const { items, loading } = useMediaLibrary();
+  const { items, loading, refresh } = useMediaLibrary();
   const [filter, setFilter] = useState("all");
   const [picked, setPicked] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const filtered = filter === "all" ? items : items.filter(i => i.type === filter);
 
@@ -4530,6 +4555,35 @@ function MediaPickerGrid({ onAttach, attachLabel = "Attach", selectedIds = [] })
     if (!picked) return;
     onAttach(picked);
     setPicked(null);
+  };
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { alert("Not authenticated"); return; }
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("userId", user.id);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.success) {
+        refresh();
+      } else {
+        alert(`Upload failed: ${data.error}`);
+      }
+    } catch (e) {
+      alert(`Upload error: ${e.message}`);
+    }
+    setUploading(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleUpload(file);
   };
 
   if (loading) return (
