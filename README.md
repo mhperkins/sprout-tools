@@ -1,4 +1,4 @@
-nternal toolset for Sprout Society including a social content management platform.
+Internal toolset for Sprout Society including a social content management platform.
 
 ## What's inside
 - Social Content Planner — integrates Canva API, Instagram API, and Composio for automated publishing with human verification
