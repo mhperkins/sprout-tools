@@ -27,7 +27,24 @@ async function composioProxy(endpoint, method = 'POST', body = null) {
   if (!res.ok || json?.successful === false) {
     throw new Error(json?.error || json?.message || `Composio proxy error: ${res.status}`);
   }
+  // Instagram sometimes returns an error object inside data even when Composio says successful
+  if (json?.data?.error) {
+    const igErr = json.data.error;
+    throw new Error(`Instagram error (${igErr.code || igErr.error_subcode || '?'}): ${igErr.message || igErr.error_user_msg || JSON.stringify(igErr)}`);
+  }
   return json;
+}
+
+// Poll until Instagram has finished processing the media container
+async function waitForContainer(creationId, maxAttempts = 10, intervalMs = 2000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await composioProxy(`/${creationId}?fields=status_code`, 'GET');
+    const status = result?.data?.status_code;
+    if (status === 'FINISHED') return;
+    if (status === 'ERROR') throw new Error('Instagram media processing failed');
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error('Instagram media container timed out after processing');
 }
 
 export async function POST(request) {
@@ -66,7 +83,8 @@ export async function POST(request) {
         const creationId = parent?.data?.id;
         if (!creationId) throw new Error('No creation_id returned from carousel container step');
 
-        // Step 3: Publish
+        // Step 3: Wait for processing, then publish
+        await waitForContainer(creationId);
         const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
         const publishedMediaId = published?.data?.id;
         if (!publishedMediaId) throw new Error('No media_id returned from carousel publish step');
@@ -89,6 +107,7 @@ export async function POST(request) {
         const creationId = container?.data?.id;
         if (!creationId) throw new Error('No creation_id returned from reel container step');
 
+        await waitForContainer(creationId);
         const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
         const publishedMediaId = published?.data?.id;
         if (!publishedMediaId) throw new Error('No media_id returned from reel publish step');
@@ -107,6 +126,7 @@ export async function POST(request) {
         const creationId = container?.data?.id;
         if (!creationId) throw new Error('No creation_id returned from story container step');
 
+        await waitForContainer(creationId);
         const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
         const publishedMediaId = published?.data?.id;
         if (!publishedMediaId) throw new Error('No media_id returned from story publish step');
@@ -125,6 +145,7 @@ export async function POST(request) {
       const creationId = container?.data?.id;
       if (!creationId) throw new Error('No creation_id returned from media container step');
 
+      await waitForContainer(creationId);
       const published = await composioProxy(`/${IG_USER_ID}/media_publish`, 'POST', { creation_id: creationId });
       const publishedMediaId = published?.data?.id;
       if (!publishedMediaId) throw new Error('No media_id returned from publish step');
@@ -148,6 +169,44 @@ export async function POST(request) {
         'GET'
       );
       return Response.json(result?.data || {});
+    }
+
+    // ── List user's media (for import) ───────────────────────────────────────
+    if (action === 'getMedia') {
+      const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
+
+      // Prefer a direct IG token if configured — bypasses Composio scope limits.
+      // Composio connections typically only have instagram_content_publish scope
+      // and cannot read media. Add IG_ACCESS_TOKEN to .env.local to enable import.
+      if (IG_ACCESS_TOKEN) {
+        const fields = 'id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count';
+        const url = `https://graph.facebook.com/v19.0/${IG_USER_ID}/media?fields=${fields}&limit=25&access_token=${IG_ACCESS_TOKEN}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.error) {
+          return Response.json({ success: false, error: `Instagram: ${json.error.message} (code ${json.error.code})` });
+        }
+        return Response.json({ success: true, media: json.data || [] });
+      }
+
+      // Fallback: try through Composio (requires instagram_basic scope on the connection)
+      const result = await composioProxy(
+        `/${IG_USER_ID}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count&limit=25`,
+        'GET'
+      );
+      const raw = result?.data;
+      if (raw?.error) {
+        return Response.json({
+          success: false,
+          error: `Instagram (via Composio) error (${raw.error.code || '?'}): ${raw.error.message || raw.error.type || 'unknown'}. Your Composio connection may be missing instagram_basic scope.`,
+        });
+      }
+      const media = Array.isArray(raw) ? raw
+        : Array.isArray(raw?.data) ? raw.data
+        : Array.isArray(result?.media) ? result.media
+        : Array.isArray(result) ? result
+        : [];
+      return Response.json({ success: true, media, _debug: media.length === 0 ? result : undefined });
     }
 
     return Response.json({ error: `Unknown action: ${action}` }, { status: 400 });
